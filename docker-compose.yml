@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: huashan-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-huashan}
+      POSTGRES_USER: ${DB_USER:-huashan}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-huashan_dev}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./docker/postgres:/docker-entrypoint-initdb.d:ro
+    ports:
+      # 避免和 QuantDinger 的 5432 冲突，host 侧用 55432
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-huashan} -d ${DB_NAME:-huashan}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: huashan-redis
+    volumes:
+      - redis_data:/data
+    ports:
+      # 避免和 QuantDinger 的 6379 冲突
+      - "127.0.0.1:56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: huashan-backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-huashan}:${DB_PASSWORD:-huashan_dev}@postgres:5432/${DB_NAME:-huashan}
+      REDIS_URL: redis://redis:6379/0
+      SKILL_DIR: /app/skills/huashan-lungu-v2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # 可放置为本地目录、软链或独立仓库；详见 skills/README.md
+      - ./skills/huashan-lungu-v2:/app/skills/huashan-lungu-v2:ro
+      - ./backend/app:/app/app  # 开发期热重载
+    ports:
+      - "8000:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build: ./frontend
+    container_name: huashan-frontend
+    depends_on:
+      - backend
+    environment:
+      # 浏览器侧用相对路径走 Next rewrite，这个 var 留作 SSE 等绝对 URL 备用
+      NEXT_PUBLIC_API_BASE: http://localhost:8000
+      # Server Component / Next 服务侧 fetch 走 docker 内网
+      API_BASE_INTERNAL: http://backend:8000
+      # 开发服务和生产 build 使用不同输出目录，避免 .next 被并发覆盖后静态资源 500
+      NEXT_DIST_DIR: .next-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      # 配置文件改了不用 rebuild
+      - ./frontend/next.config.mjs:/app/next.config.mjs:ro
+      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts:ro
+      - ./frontend/postcss.config.mjs:/app/postcss.config.mjs:ro
+      - ./frontend/tsconfig.json:/app/tsconfig.json:ro
+
+volumes:
+  pg_data:
+  redis_data:

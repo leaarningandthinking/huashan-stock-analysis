@@ -1,0 +1,50 @@
+# 环境
+.env
+.env.local
+.env.*.local
+!.env.example
+!frontend/.env.local.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+.next/
+.next-dev/
+.next-build/
+out/
+.turbo/
+dist/
+coverage/
+tsconfig.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 本地数据
+*.log
+*.sqlite
+*.db
+.cache/
+*.pid
+*.seed
+
+# 外部 skill 内容可通过本地目录或独立仓库挂载，避免提交绝对路径软链
+skills/huashan-lungu-v2
+
+# Docker volumes（如果挂到仓库根目录）
+/data/
+
+# OS / generated
+Thumbs.db
