@@ -23,6 +23,7 @@ async def run_debate(
     *,
     masters: list[str],
     report_card: str,
+    research_manager: dict | None = None,
     queue: EventQueue,
     llm: LLMClient,
     model: str,
@@ -67,9 +68,14 @@ async def run_debate(
 
             # 上下文：报告卡片 + 之前所有发言
             user_parts = [
-                "下面是用户持仓和 4 位分析师的报告。请基于此发言。",
+                "下面是用户持仓、4 位分析师报告，以及投研经理提炼出的核心分歧。请围绕核心分歧发言。",
                 "",
                 report_card,
+                "---",
+                "",
+                "## 投研经理分析",
+                "",
+                str((research_manager or {}).get("text") or "（投研经理分析缺失，请直接基于分析师报告辩论。）"),
             ]
             if transcript:
                 user_parts.append("---")
@@ -103,7 +109,7 @@ async def run_debate(
             chunks: list[str] = []
             try:
                 async for delta in llm.stream(
-                    messages, model, temperature=0.7, max_tokens=900,
+                    messages, model, temperature=0.7, max_tokens=1200,
                 ):
                     chunks.append(delta)
                     await queue.emit(

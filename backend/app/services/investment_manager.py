@@ -14,13 +14,25 @@ logger = logging.getLogger(__name__)
 def _build_user_input(
     *,
     report_card: str,
+    research_manager: dict | None,
     transcript: list[dict],
     risk_results: dict,
+    mode: str = "portfolio",
 ) -> str:
+    intro = (
+        "以下是单股研究标的、分析师报告、投研经理分析、大师圆桌观点与风控审核。用户未提供当前持仓，请据此给出是否建立观察/买入/卖出/观望的投资经理决策；不要假设已有仓位。"
+        if mode == "single"
+        else "以下是用户持仓、分析师报告、投研经理分析、大师圆桌观点与风控审核。请据此给出投资经理最终决策。"
+    )
     parts = [
-        "以下是用户持仓、分析师报告、大师圆桌观点与风控审核。请据此给出投资经理最终决策。",
+        intro,
         "",
         report_card,
+        "---",
+        "",
+        "## 投研经理分析",
+        "",
+        str((research_manager or {}).get("text") or "（缺失）"),
         "---",
         "",
         "## 大师圆桌观点",
@@ -47,6 +59,7 @@ def _build_user_input(
 async def run_investment_manager_decision(
     *,
     report_card: str,
+    research_manager: dict | None = None,
     transcript: list[dict],
     risk_results: dict,
     queue: EventQueue,
@@ -64,12 +77,14 @@ async def run_investment_manager_decision(
                 role="user",
                 content=_build_user_input(
                     report_card=report_card,
+                    research_manager=research_manager,
                     transcript=transcript,
                     risk_results=risk_results,
+                    mode=mode,
                 ),
             ),
         ]
-        async for delta in llm.stream(messages, model, temperature=0.35, max_tokens=800):
+        async for delta in llm.stream(messages, model, temperature=0.35, max_tokens=1300):
             chunks.append(delta)
             await queue.emit("manager.delta", text=delta)
     except Exception as e:

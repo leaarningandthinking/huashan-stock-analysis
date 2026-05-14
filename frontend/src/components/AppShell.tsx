@@ -11,6 +11,7 @@ import {
   CircleDot,
   DatabaseZap,
   ListChecks,
+  Layers3,
   SlidersHorizontal,
   MessageSquareText,
   Mountain,
@@ -25,6 +26,7 @@ const NAV_ITEMS = [
   { label: "首页", icon: BarChart3, href: "/" },
   { label: "论股 Agent", icon: Bot, href: "/debate/single" },
   { label: "持仓诊断", icon: Briefcase, href: "/debate/portfolio" },
+  { label: "批量分析", icon: Layers3, href: "/debate/batch" },
   { label: "分析任务", icon: ListChecks, href: "/tasks" },
   { label: "大师百科", icon: UsersRound, href: "/masters" },
   { label: "模型配置", icon: SlidersHorizontal, href: "/settings/llm" },
@@ -34,7 +36,7 @@ const NAV_ITEMS = [
 function isActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
   if (href === "/debate/single") {
-    return pathname.startsWith("/debate") && !pathname.startsWith("/debate/portfolio");
+    return pathname.startsWith("/debate") && !pathname.startsWith("/debate/portfolio") && !pathname.startsWith("/debate/batch");
   }
   return pathname === href || pathname.startsWith(`${href}/`);
 }

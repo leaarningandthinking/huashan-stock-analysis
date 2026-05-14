@@ -6,16 +6,24 @@ import {
   ArrowRight,
   CheckCircle2,
   Clock3,
+  Download,
   Loader2,
   PlayCircle,
   RefreshCw,
+  X,
   XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
+  getDiagnosisReport,
   listDiagnosisTasks,
   type DiagnosisTaskSummary,
 } from "@/lib/diagnosis-api";
+import {
+  buildMarkdown,
+  buildPrintHtml,
+  type ReportShape,
+} from "@/components/report/DiagnosisReportView";
 
 const STATUS_META: Record<
   DiagnosisTaskSummary["status"],
@@ -53,9 +61,29 @@ function buildTitle(task: DiagnosisTaskSummary) {
   return `${task.stocks[0].name}等 ${task.stocks.length} 只标的`;
 }
 
+function buildReportTitle(task: DiagnosisTaskSummary) {
+  if (task.stocks.length === 1 && task.stocks[0].name) {
+    return `华山论股·${task.stocks[0].name}股票报告`;
+  }
+  if (task.mode === "batch" && task.stocks.length > 0) {
+    return `华山论股·${task.stocks.length}只股票报告`;
+  }
+  if (task.mode === "portfolio") {
+    return "华山论股·持仓组合报告";
+  }
+  return "华山论股·股票报告";
+}
+
+function safeFileName(name: string) {
+  return name.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, "");
+}
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<DiagnosisTaskSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [downloadTask, setDownloadTask] = useState<DiagnosisTaskSummary | null>(null);
+  const [downloading, setDownloading] = useState<"pdf" | "md" | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -81,6 +109,63 @@ export default function TasksPage() {
       ),
     [tasks],
   );
+
+  async function fetchCompletedReport(task: DiagnosisTaskSummary) {
+    const data = await getDiagnosisReport(task.diagnosis_id);
+    if (data.status !== "done" || !data.report) {
+      throw new Error("报告尚未生成完成，暂时不能下载");
+    }
+    return data.report as ReportShape;
+  }
+
+  async function downloadMarkdownReport(task: DiagnosisTaskSummary) {
+    setDownloading("md");
+    setDownloadError(null);
+    try {
+      const report = await fetchCompletedReport(task);
+      const title = buildReportTitle(task);
+      const markdown = buildMarkdown(task.diagnosis_id, report, title);
+      const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safeFileName(title)}-${task.diagnosis_id.slice(0, 8)}.md`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setDownloadTask(null);
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloading(null);
+    }
+  }
+
+  async function downloadPdfReport(task: DiagnosisTaskSummary) {
+    setDownloading("pdf");
+    setDownloadError(null);
+    try {
+      const report = await fetchCompletedReport(task);
+      const title = buildReportTitle(task);
+      const html = buildPrintHtml(task.diagnosis_id, report, title);
+      const win = window.open("", "_blank");
+      if (!win) {
+        throw new Error("浏览器拦截了打印窗口，请允许弹窗后重试");
+      }
+      win.document.write(html);
+      win.document.close();
+      win.onload = () => {
+        win.focus();
+        win.print();
+      };
+      setDownloadTask(null);
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloading(null);
+    }
+  }
 
   return (
     <main className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-8 lg:px-10 lg:py-12">
@@ -138,12 +223,11 @@ export default function TasksPage() {
                 ? `/debate/${task.diagnosis_id}/report`
                 : `/debate/${task.diagnosis_id}`;
             return (
-              <Link
+              <article
                 key={task.diagnosis_id}
-                href={href}
                 className="group grid gap-4 rounded-2xl border border-ink-200 bg-[#fffdf8] p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-[#e6b8b1] hover:shadow-md md:grid-cols-[1fr_auto]"
               >
-                <div className="min-w-0">
+                <Link href={href} className="min-w-0">
                   <div className="mb-3 flex flex-wrap items-center gap-2">
                     <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${status.className}`}>
                       <StatusIcon className="h-3.5 w-3.5" />
@@ -164,16 +248,89 @@ export default function TasksPage() {
                     {task.stocks.length > 6 && <span>+{task.stocks.length - 6}</span>}
                   </div>
                   {task.error && <p className="mt-3 text-xs text-red-700">{task.error}</p>}
-                </div>
+                </Link>
                 <div className="flex items-center justify-between gap-4 md:justify-end">
                   <div className="text-xs text-ink-400">
                     {task.masters.length > 0 ? `${task.masters.length} 位大师` : "未选择大师"}
                   </div>
-                  <ArrowRight className="h-5 w-5 text-ink-300 transition group-hover:translate-x-0.5 group-hover:text-scarlet-600" />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={task.status !== "done"}
+                    onClick={() => {
+                      setDownloadTask(task);
+                      setDownloadError(null);
+                    }}
+                    title={task.status === "done" ? "下载报告" : "报告完成后可下载"}
+                  >
+                    <Download className="h-4 w-4" />
+                    下载
+                  </Button>
+                  <Link href={href} aria-label="查看报告">
+                    <ArrowRight className="h-5 w-5 text-ink-300 transition group-hover:translate-x-0.5 group-hover:text-scarlet-600" />
+                  </Link>
                 </div>
-              </Link>
+              </article>
             );
           })}
+        </div>
+      )}
+
+      {downloadTask && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/30 px-4">
+          <div className="w-full max-w-sm rounded-lg border border-ink-200 bg-[#fffdf8] p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-ink-900">下载分析报告</h2>
+                <p className="mt-1 truncate text-xs text-ink-400">{buildTitle(downloadTask)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setDownloadTask(null);
+                  setDownloadError(null);
+                }}
+                className="rounded p-1 text-ink-400 hover:bg-ink-100 hover:text-ink-800"
+                aria-label="关闭"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid gap-3">
+              <Button
+                onClick={() => downloadPdfReport(downloadTask)}
+                disabled={Boolean(downloading)}
+              >
+                {downloading === "pdf" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                PDF 格式
+              </Button>
+              <Button
+                onClick={() => downloadMarkdownReport(downloadTask)}
+                variant="outline"
+                disabled={Boolean(downloading)}
+              >
+                {downloading === "md" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                Markdown 格式
+              </Button>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-ink-500">
+              PDF 会打开浏览器打印窗口，选择“保存为 PDF”。建议关闭“页眉和页脚”。
+            </p>
+            {downloadError && (
+              <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-xs leading-5 text-red-700">
+                {downloadError}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </main>

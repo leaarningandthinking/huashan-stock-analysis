@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     session_secret: str = "dev-session-secret-change-me"
     anon_cookie_name: str = "hs_anon"
     anon_cookie_max_age: int = 60 * 60 * 24 * 365  # 1 年
+    auth_secret: str = "dev-auth-secret-change-me"
+    password_hash_pepper: str = "dev-password-pepper-change-me"
+    auth_cookie_name: str = "hs_session"
+    auth_cookie_secure: bool = False
+    auth_session_max_age: int = 60 * 60 * 24 * 30  # 30 天
 
     # Skill
     skill_dir: Path = Path("/app/skills/huashan-lungu-v2")

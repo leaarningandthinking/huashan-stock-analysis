@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import update
 
-from app.api import datasource, diagnosis, health, llm, masters, portfolio, stock
+from app.api import auth, datasource, diagnosis, health, llm, masters, portfolio, stock
 from app.config import get_settings
 from app.db import engine
 from app.models.base import Base
@@ -49,6 +49,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router, prefix="/api")
+app.include_router(auth.router)
 app.include_router(masters.router)
 app.include_router(llm.router)
 app.include_router(stock.router)

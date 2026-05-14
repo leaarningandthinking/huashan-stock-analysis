@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 def _build_user_input(
     *,
     report_card: str,
+    research_manager: dict | None,
     transcript: list[dict],
     risk_results: dict,
     manager_decision: dict,
@@ -23,6 +24,11 @@ def _build_user_input(
         "",
         "## 分析师报告与结构化材料",
         report_card,
+        "---",
+        "",
+        "## 投研经理分析",
+        "",
+        str((research_manager or {}).get("text") or "（缺失）"),
         "---",
         "",
         "## 大师圆桌观点",
@@ -53,6 +59,7 @@ def _build_user_input(
 async def run_report_summary(
     *,
     report_card: str,
+    research_manager: dict | None = None,
     transcript: list[dict],
     risk_results: dict,
     manager_decision: dict,
@@ -70,13 +77,14 @@ async def run_report_summary(
                 role="user",
                 content=_build_user_input(
                     report_card=report_card,
+                    research_manager=research_manager,
                     transcript=transcript,
                     risk_results=risk_results,
                     manager_decision=manager_decision,
                 ),
             ),
         ]
-        async for delta in llm.stream(messages, model, temperature=0.25, max_tokens=900):
+        async for delta in llm.stream(messages, model, temperature=0.25, max_tokens=1200):
             chunks.append(delta)
             await queue.emit("summary.delta", text=delta)
     except Exception as e:

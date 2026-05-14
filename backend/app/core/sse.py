@@ -1,10 +1,11 @@
 """SSE 事件协议与工具。
 
 事件类型按 Skill 文档约定：
-  step.start / step.done       — 6 步主流程
+  step.start / step.done       — 7 步主流程
   analyst.start/delta/done     — 4 分析师
-  master.start/delta/done      — 大师圆桌观点（W6）
-  risk.start/delta/done        — 风控审核（W6）
+  research_manager.*           — 投研经理分析
+  master.start/delta/done      — 大师圆桌观点
+  risk.start/delta/done        — 风控审核
   manager.start/delta/done     — 投资经理决策
   summary.start/delta/done     — 报告摘要
   report.ready                 — 最终报告就绪

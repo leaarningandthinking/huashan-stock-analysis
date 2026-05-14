@@ -46,7 +46,7 @@ def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
 
 async def get_technical(code: str, days: int = 120) -> dict | None:
     """近 N 日行情 + 技术指标。"""
-    cache_key = f"technical:{code}:{days}"
+    cache_key = f"technical:v2:{code}:{days}"
     if (c := await cache_get(cache_key)) is not None:
         return c
 
@@ -94,9 +94,12 @@ async def get_technical(code: str, days: int = 120) -> dict | None:
     tail["date"] = tail["date"].astype(str)
 
     last = tail.iloc[-1]
+    volume = tail["volume"] if "volume" in tail else pd.Series(dtype="float64")
     summary = {
         "last_date": str(last["date"]),
         "last_close": float(last["close"]),
+        "change_pct_5d": _pct_change(tail["close"], 5),
+        "change_pct_20d": _pct_change(tail["close"], 20),
         "ma5": _safe_float(last["ma5"]),
         "ma20": _safe_float(last["ma20"]),
         "ma60": _safe_float(last["ma60"]),
@@ -104,6 +107,10 @@ async def get_technical(code: str, days: int = 120) -> dict | None:
         "macd_diff": _safe_float(last["macd_diff"]),
         "macd_dea": _safe_float(last["macd_dea"]),
         "macd_hist": _safe_float(last["macd_hist"]),
+        "latest_volume": _safe_float(last.get("volume")),
+        "volume_ma5": _safe_float(volume.rolling(5).mean().iloc[-1]) if len(volume) >= 5 else None,
+        "volume_ma20": _safe_float(volume.rolling(20).mean().iloc[-1]) if len(volume) >= 20 else None,
+        "volume_ratio_vs_20d": _volume_ratio(volume, 20),
         "trend": _classify_trend(tail),
     }
 
@@ -122,6 +129,26 @@ def _safe_float(v) -> float | None:
     if v is None or pd.isna(v):
         return None
     return float(v)
+
+
+def _pct_change(series: pd.Series, periods: int) -> float | None:
+    if len(series) <= periods:
+        return None
+    base = series.iloc[-periods - 1]
+    latest = series.iloc[-1]
+    if base is None or pd.isna(base) or float(base) == 0:
+        return None
+    return (float(latest) / float(base) - 1) * 100
+
+
+def _volume_ratio(series: pd.Series, periods: int) -> float | None:
+    if len(series) < periods:
+        return None
+    latest = series.iloc[-1]
+    avg = series.tail(periods).mean()
+    if pd.isna(latest) or pd.isna(avg) or float(avg) == 0:
+        return None
+    return float(latest) / float(avg)
 
 
 def _classify_trend(df: pd.DataFrame) -> str:

@@ -13,7 +13,7 @@ export interface StepInfo {
 const WEIGHTS: Record<number, number> = {
   1: 1,   // 持仓概览（瞬完成）
   2: 6,   // 分析师团队（4 LLM 并行 ~1 倍单次）
-  3: 0.5, // 结构化报告（拼接，瞬完成）
+  3: 0.5, // 投研经理分析
   4: 12,  // 大师圆桌观点（2-3 大师 × 2 轮串行）
   5: 3,   // 风控审核（两派并行）
   6: 4,   // 投资经理决策
@@ -72,13 +72,11 @@ export function ProgressBar({ steps }: Props) {
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-ink-100">
         <div
-          className={cn(
-            "h-full rounded-full transition-all duration-500 ease-out",
-            allDone
-              ? "bg-emerald-500"
-              : "bg-gradient-to-r from-scarlet-400 to-scarlet-600",
-          )}
-          style={{ width: `${pct}%` }}
+          className="h-full rounded-full transition-[width] duration-500 ease-out"
+          style={{
+            width: `${pct}%`,
+            backgroundColor: allDone ? "#059669" : "#a83232",
+          }}
         />
       </div>
     </div>

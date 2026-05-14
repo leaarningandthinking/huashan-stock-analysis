@@ -18,11 +18,26 @@ logger = logging.getLogger(__name__)
 RISK_SCHOOLS = ["aggressive", "conservative"]
 
 
-def _build_user_input(report_card: str, transcript: list[dict]) -> str:
+def _build_user_input(
+    report_card: str,
+    transcript: list[dict],
+    research_manager: dict | None,
+    mode: str = "portfolio",
+) -> str:
+    intro = (
+        "以下是单股研究标的、4 位分析师报告、投研经理分析和大师圆桌观点。用户未提供当前持仓，请按候选标的研究口径作风控陈述。"
+        if mode == "single"
+        else "以下是用户持仓、4 位分析师报告、投研经理分析和大师圆桌观点。请据此作风控陈述。"
+    )
     parts = [
-        "以下是用户持仓 + 4 位分析师报告 + 大师圆桌观点。请据此作风控陈述。",
+        intro,
         "",
         report_card,
+        "---",
+        "",
+        "## 投研经理分析",
+        "",
+        str((research_manager or {}).get("text") or "（缺失）"),
         "---",
         "",
         "## 大师圆桌观点",
@@ -39,11 +54,13 @@ async def run_risk_review(
     *,
     report_card: str,
     transcript: list[dict],
+    research_manager: dict | None = None,
     queue: EventQueue,
     llm: LLMClient,
     model: str,
+    mode: str = "portfolio",
 ) -> dict:
-    user_input = _build_user_input(report_card, transcript)
+    user_input = _build_user_input(report_card, transcript, research_manager, mode=mode)
 
     async def safe_run(school: str) -> dict:
         label = RISK_LABELS[school]
@@ -55,7 +72,7 @@ async def run_risk_review(
                 Message(role="user", content=user_input),
             ]
             async for delta in llm.stream(
-                messages, model, temperature=0.5, max_tokens=600,
+                messages, model, temperature=0.5, max_tokens=900,
             ):
                 chunks.append(delta)
                 await queue.emit("risk.delta", school=school, text=delta)

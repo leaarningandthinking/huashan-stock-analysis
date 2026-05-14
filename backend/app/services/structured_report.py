@@ -14,21 +14,28 @@ from app.prompts.analysts import ANALYST_LABELS
 def build_report_for_debate(
     holdings: list[dict],
     analyst_results: dict[str, dict],
+    mode: str = "portfolio",
 ) -> str:
     """生成一份给大师辩论用的 markdown 数据卡片。"""
     parts: list[str] = []
 
-    # 持仓概览
-    parts.append("# 用户持仓")
-    for h in holdings:
-        line = f"- {h['name']}（{h['code']}"
-        if h.get("weight") is not None:
-            line += f", 占比 {h['weight']*100:.1f}%"
-        if h.get("pnl") is not None:
-            sign = "+" if h["pnl"] >= 0 else ""
-            line += f", 浮盈 {sign}{h['pnl']*100:.1f}%"
-        line += "）"
-        parts.append(line)
+    if mode == "single":
+        parts.append("# 单股研究标的")
+        parts.append("用户仅选择了单只股票进行论股分析，未提供当前持仓、成本价、持仓占比或浮盈亏。")
+        parts.append("后续讨论应按“候选标的研究/是否值得建立或继续观察”的口径处理，不要假设用户已经持有仓位。")
+        for h in holdings:
+            parts.append(f"- {h['name']}（{h['code']}）")
+    else:
+        parts.append("# 用户持仓")
+        for h in holdings:
+            line = f"- {h['name']}（{h['code']}"
+            if h.get("weight") is not None:
+                line += f", 占比 {h['weight']*100:.1f}%"
+            if h.get("pnl") is not None:
+                sign = "+" if h["pnl"] >= 0 else ""
+                line += f", 浮盈 {sign}{h['pnl']*100:.1f}%"
+            line += "）"
+            parts.append(line)
     parts.append("")
 
     # 每个 analyst 一段
@@ -41,8 +48,8 @@ def build_report_for_debate(
         else:
             text = result["text"].strip()
             # 限长，避免 prompt 太大
-            if len(text) > 2500:
-                text = text[:2500] + "\n…（已截断）"
+            if len(text) > 4000:
+                text = text[:4000] + "\n…（已截断）"
             parts.append(text)
         parts.append("")
 

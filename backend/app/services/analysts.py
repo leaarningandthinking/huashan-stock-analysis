@@ -10,7 +10,7 @@ import logging
 
 from app.core.sse import EventQueue
 from app.data.fundamentals import get_financial_abstract, get_industry_valuation, get_valuation
-from app.data.news import get_news
+from app.data.news import get_market_signal_news, get_news
 from app.data.sentiment import get_sentiment
 from app.data.technical import get_technical
 from app.llm.base import LLMClient, Message
@@ -45,9 +45,6 @@ def _format_financial_card(fin: dict) -> str:
     for category in ("利润表", "现金流量表", "资产负债表"):
         category_rows = [row for row in rows if row.get("category") == category]
         if not category_rows:
-            lines.append(f"### {category}")
-            lines.append("- 数据缺失")
-            lines.append("")
             continue
         lines.append(f"### {category}")
         for row in category_rows:
@@ -103,22 +100,86 @@ async def _build_data_card(role: str, code: str, name: str) -> tuple[str, dict]:
         return "\n".join(parts), {"financial": fin, "valuation": val, "industry": ind_val}
 
     if role == "sentiment":
-        stock_sentiment = await get_sentiment(code)
+        import asyncio as _aio
+        stock_sentiment, market_signals = await _aio.gather(
+            get_sentiment(code),
+            get_market_signal_news(code, limit=10),
+            return_exceptions=False,
+        )
         if not stock_sentiment:
             return "（情绪数据暂时拉不到）", {}
-        return f"# 情绪数据卡片 · {name}（{code}）\n\n{_truncate_json(stock_sentiment)}", stock_sentiment
+        data = {
+            "stock_sentiment": stock_sentiment,
+            "market_signal_news": market_signals or [],
+        }
+        parts = [
+            f"# 情绪数据卡片 · {name}（{code}）",
+            "",
+            "## 千股千评指标",
+            _truncate_json(stock_sentiment),
+        ]
+        if market_signals:
+            parts.extend([
+                "",
+                "## 交易情绪资讯",
+                "以下内容来自新闻源中的资金流、融资融券、龙虎榜、北向资金、涨跌幅或行情异动类条目；请把它们作为市场情绪和资金行为证据，不要写成公司新闻。",
+                "",
+                _truncate_json(market_signals),
+            ])
+        return "\n".join(parts), data
 
     if role == "news":
         data = await get_news(code, limit=10)
         if not data:
             return "（新闻数据暂时拉不到）", {}
-        return f"# 近期新闻 · {name}（{code}）\n\n{_truncate_json(data)}", {"items": data}
+        parts = [
+            f"# 近期新闻资讯 · {name}（{code}）",
+            "",
+            "请只基于下列新闻标题、时间、来源和摘要提炼新闻事件；不要把行情、资金流、技术形态或投资逻辑作为新闻结论。",
+            "",
+            _truncate_json(data),
+        ]
+        return "\n".join(parts), {"items": data}
 
     if role == "technical":
         data = await get_technical(code, days=60)
         if not data:
             return "（技术数据暂时拉不到）", {}
-        return f"# 技术指标卡片 · {name}（{code}）\n\n{_truncate_json(data, 6000)}", data
+        summary = data.get("summary") or {}
+        parts = [f"# 技术指标卡片 · {name}（{code}）", ""]
+        if summary:
+            parts.append("## 技术摘要")
+            labels = {
+                "last_date": "最新交易日",
+                "last_close": "最新收盘价",
+                "change_pct_5d": "近 5 日涨跌幅",
+                "change_pct_20d": "近 20 日涨跌幅",
+                "ma5": "MA5",
+                "ma20": "MA20",
+                "ma60": "MA60",
+                "rsi14": "RSI14",
+                "macd_diff": "MACD Diff",
+                "macd_dea": "MACD DEA",
+                "macd_hist": "MACD 柱",
+                "latest_volume": "最新成交量",
+                "volume_ma5": "5 日均量",
+                "volume_ma20": "20 日均量",
+                "volume_ratio_vs_20d": "量能 / 20 日均量",
+                "trend": "趋势判断",
+            }
+            for key, label in labels.items():
+                value = summary.get(key)
+                if value is None:
+                    continue
+                suffix = "%" if key.startswith("change_pct") else ""
+                if isinstance(value, float):
+                    parts.append(f"- {label}: {value:.2f}{suffix}")
+                else:
+                    parts.append(f"- {label}: {value}{suffix}")
+            parts.append("")
+        parts.append("## 近 60 日价格与成交量序列")
+        parts.append(_truncate_json(data.get("series") or {}, 4500))
+        return "\n".join(parts), data
 
     raise ValueError(f"unknown analyst role: {role}")
 
@@ -164,7 +225,7 @@ async def run_analyst(
 
         chunk_count = 0
         try:
-            async for delta in llm.stream(messages, model, temperature=0.4, max_tokens=600):
+            async for delta in llm.stream(messages, model, temperature=0.4, max_tokens=1000):
                 full_text_parts.append(delta)
                 await queue.emit("analyst.delta", analyst=role, text=delta)
                 chunk_count += 1

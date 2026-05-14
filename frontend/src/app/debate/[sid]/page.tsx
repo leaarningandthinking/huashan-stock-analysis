@@ -34,7 +34,7 @@ interface StepInfo {
 const INITIAL_STEPS: StepInfo[] = [
   { step: 1, name: "持仓概览", status: "pending" },
   { step: 2, name: "分析师团队", status: "pending" },
-  { step: 3, name: "结构化报告", status: "pending" },
+  { step: 3, name: "投研经理分析", status: "pending" },
   { step: 4, name: "大师圆桌观点", status: "pending" },
   { step: 5, name: "风控审核", status: "pending" },
   { step: 6, name: "投资经理决策", status: "pending" },
@@ -53,6 +53,7 @@ interface DiagnosisContext {
 
 type ReportSnapshot = {
   analysts?: Record<string, { text?: string; failed?: boolean; error?: string }>;
+  research_manager?: { text?: string; failed?: boolean; error?: string };
   debate?: { transcript?: MasterTurnData[] };
   risk?: Record<string, { text?: string; failed?: boolean }>;
   investment_manager?: { text?: string; failed?: boolean };
@@ -67,7 +68,17 @@ function buildSteps(ctx: DiagnosisContext | null): StepInfo[] {
 
 function applyContextToSteps(prev: StepInfo[], ctx: DiagnosisContext | null): StepInfo[] {
   const prevByStep = new Map(prev.map((s) => [s.step, s]));
-  return buildSteps(ctx).map((base) => ({ ...base, ...prevByStep.get(base.step) }));
+  return buildSteps(ctx).map((base) => ({
+    ...base,
+    ...prevByStep.get(base.step),
+    name: normalizeStepName(base.step, prevByStep.get(base.step)?.name ?? base.name),
+  }));
+}
+
+function normalizeStepName(step: number, name: string): string {
+  if (step === 3) return "投研经理分析";
+  if (step === 4) return "大师圆桌观点";
+  return name;
 }
 
 function buildPageTitle(ctx: DiagnosisContext | null): string {
@@ -102,6 +113,10 @@ export default function DiagnosisStreamPage() {
   });
   const [lineup, setLineup] = useState<{ slug: string; name: string; tagline?: string }[]>([]);
   const [turns, setTurns] = useState<MasterTurnData[]>([]);
+  const [researchManager, setResearchManager] = useState<RiskState>({
+    status: "pending",
+    text: "",
+  });
   const [riskStates, setRiskStates] = useState<Record<RiskSchool, RiskState>>(INITIAL_RISK);
   const [managerDecision, setManagerDecision] = useState<RiskState>({
     status: "pending",
@@ -223,6 +238,12 @@ export default function DiagnosisStreamPage() {
     if (snapshot.debate?.transcript) {
       setTurns(snapshot.debate.transcript.map((turn) => ({ ...turn, done: true })));
     }
+    if (snapshot.research_manager) {
+      setResearchManager({
+        status: snapshot.research_manager.failed ? "fail" : "done",
+        text: snapshot.research_manager.text ?? snapshot.research_manager.error ?? "",
+      });
+    }
     if (snapshot.risk) {
       setRiskStates((prev) => ({
         ...prev,
@@ -254,7 +275,9 @@ export default function DiagnosisStreamPage() {
       case "step.start":
         setSteps((s) =>
           s.map((x) =>
-            x.step === data.step ? { ...x, status: "running", name: data.name ?? x.name } : x,
+            x.step === data.step
+              ? { ...x, status: "running", name: normalizeStepName(x.step, data.name ?? x.name) }
+              : x,
           ),
         );
         break;
@@ -267,7 +290,7 @@ export default function DiagnosisStreamPage() {
         setSteps((s) =>
           s.map((x) =>
             x.step === data.step
-              ? { ...x, status: "skipped", name: data.name ?? x.name }
+              ? { ...x, status: "skipped", name: normalizeStepName(x.step, data.name ?? x.name) }
               : x,
           ),
         );
@@ -308,6 +331,15 @@ export default function DiagnosisStreamPage() {
               `\n\n⚠️ 分析师失败：${data.error ?? "(unknown)"}`,
           },
         }));
+        break;
+      case "research_manager.start":
+        setResearchManager((s) => ({ ...s, status: "running" }));
+        break;
+      case "research_manager.delta":
+        setResearchManager((s) => ({ ...s, text: s.text + (data.text ?? "") }));
+        break;
+      case "research_manager.done":
+        setResearchManager((s) => ({ ...s, status: data.failed ? "fail" : "done" }));
         break;
       case "debate.lineup":
         setLineup(data.masters ?? []);
@@ -451,6 +483,22 @@ export default function DiagnosisStreamPage() {
       </section>
 
       <section className="mt-8">
+        <h2 className="mb-3 text-lg font-semibold text-ink-700">投研经理分析</h2>
+        <div className="rounded-lg border border-ink-200 bg-white/70 p-4">
+          <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-ink-700">
+            {researchManager.text || (
+              <span className="text-ink-400">
+                {researchManager.status === "pending" ? "等待分析师报告完成…" : "等待数据…"}
+              </span>
+            )}
+            {researchManager.status === "running" && researchManager.text && (
+              <span className="inline-block h-3 w-1.5 animate-pulse bg-scarlet-500/40 align-middle" />
+            )}
+          </pre>
+        </div>
+      </section>
+
+      <section className="mt-8">
         <h2 className="mb-3 text-lg font-semibold text-ink-700">大师圆桌观点</h2>
         <DebateStage turns={turns} lineup={lineup} />
       </section>
@@ -480,6 +528,7 @@ export default function DiagnosisStreamPage() {
         <section className="mt-8 rounded-md border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-800">
           <p className="font-medium">
             报告就绪 · {reportReady.master_count ?? 0} 轮发言 · {reportReady.risk_count ?? 0} 派风控
+            {reportReady.has_research_manager ? " · 投研经理已完成分析" : ""}
             {reportReady.has_manager ? " · 投资经理已决策" : ""}
           </p>
           <p className="mt-1 text-xs text-emerald-700">
