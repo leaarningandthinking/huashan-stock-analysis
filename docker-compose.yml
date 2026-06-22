@@ -46,7 +46,7 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      # 可放置为本地目录、软链或独立仓库；详见 skills/README.md
+      # Skill 随仓库发布，容器内只读挂载。
       - ./skills/huashan-lungu-v2:/app/skills/huashan-lungu-v2:ro
       - ./backend/app:/app/app  # 开发期热重载
     ports:

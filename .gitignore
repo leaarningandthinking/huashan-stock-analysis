@@ -40,9 +40,6 @@ tsconfig.tsbuildinfo
 *.pid
 *.seed
 
-# 外部 skill 内容可通过本地目录或独立仓库挂载，避免提交绝对路径软链
-skills/huashan-lungu-v2
-
 # Docker volumes（如果挂到仓库根目录）
 /data/
 

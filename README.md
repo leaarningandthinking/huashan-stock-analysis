@@ -6,13 +6,14 @@
 
 ## 功能特性
 
-- 单股论股、批量分析、持仓诊断三种入口
+- 单股论股、批量分析、持仓诊断、短线分析四类入口
 - A 股、港股、美股代码校验与基础数据接入
 - A 股使用 akshare，港美股优先使用 yfinance
 - 4 位分析师并行分析：基本面、技术面、新闻、情绪
 - 大师圆桌观点、风控审核、投资经理决策
+- 短线分析：A 股技术面规则判断、近一年 K 线、支撑/压力区、任务管理
 - SSE 实时进度 + 2 分钟轮询兜底恢复
-- 完整报告支持摘要、Tab 浏览、Markdown / PDF 导出
+- 完整报告支持摘要、Tab 浏览、Markdown / PDF 导出、分享链接
 - 多 LLM Provider 配置，API Key 仅保存在浏览器 localStorage
 
 ## 技术栈
@@ -99,10 +100,13 @@ cd backend && pytest
 backend/             FastAPI 后端、数据源、诊断编排、SSE
 frontend/            Next.js 前端
 docker/              Postgres 初始化脚本
-skills/              本地 skill 入口，默认可挂载外部 huashan-lungu-v2
+docs/                维护说明和发布检查清单
+skills/              内置 huashan-lungu-v2 大师方法论与工作流
 ARCHITECTURE.md      架构说明
 docker-compose.yml   本地一键启动
 ```
+
+短线分析模块的维护说明见 [docs/SHORT_TERM_ANALYSIS.md](./docs/SHORT_TERM_ANALYSIS.md)。
 
 ## 数据与密钥
 

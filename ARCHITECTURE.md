@@ -1,15 +1,15 @@
 # 华山论股 · 架构摘要
 
 > 面向 AI / 新开发者的快速导览。目标：**不读代码就能回答 "这个功能在哪里？"**。
-> 最后更新：2026-05-10
+> 最后更新：2026-05-23
 
 ---
 
 ## 1. 项目一句话
 
-**19 位投资大师 AI 持仓诊断 Web 版**——用户输入持仓（单股 / 批量 / 整盘），选 2-3 位大师，后端编排 4 分析师并行 + 多轮大师辩论 + 3 派风控审核，经 SSE 流式吐字返回。
+**投资研究与短线技术分析 Web 版**——用户输入持仓（单股 / 批量 / 整盘），选 2-3 位大师，后端编排 4 分析师并行 + 多轮大师辩论 + 3 派风控审核，经 SSE 流式吐字返回；也支持独立的 A 股短线分析入口，输出技术规则判断、K 线关键价位、任务记录和导出报告。
 
-> ⚠️ 实际代码里注册的大师是 **16 位**（华人五绝 5 + 欧美七雄 7 + 技术四杰 4）。README/首页文案写 "19 位" 是早期文案，改动务必同步。见 `backend/app/prompts/masters_meta.py`。
+> 实际代码里注册 **16 位**大师（华人五绝 5 + 欧美七雄 7 + 技术四杰 4），数量和分类以 `backend/app/prompts/masters_meta.py` 为准。
 
 ## 2. 技术栈
 
@@ -33,6 +33,7 @@ huashan-lungu-web/
 │   │   ├── redis_client.py      # Redis 单例
 │   │   ├── api/                 # REST 路由（每个 router 挂 /api/xxx）
 │   │   │   ├── diagnosis.py     # ★ 诊断主入口 + SSE 流（见 §5）
+│   │   │   ├── short_term.py    # ★ 短线分析任务 / 报告 / 分享（见 §10）
 │   │   │   ├── portfolio.py     # 持仓解析入口
 │   │   │   ├── masters.py       # 大师目录
 │   │   │   ├── llm.py           # Provider 元信息 + 连通性测试
@@ -42,6 +43,7 @@ huashan-lungu-web/
 │   │   │   └── deps.py          # FastAPI DI（get_database / get_anon / get_redis_dep）
 │   │   ├── services/            # 业务编排
 │   │   │   ├── orchestrator.py  # ★ 6-step 主流程编排器（见 §4）
+│   │   │   ├── short_term.py    # 短线分析：日线取数、指标、规则上下文、LLM 报告
 │   │   │   ├── analysts.py      # 4 分析师执行逻辑
 │   │   │   ├── debate.py        # 大师多轮辩论（串行）
 │   │   │   ├── risk.py          # 3 派风控审核（并发）
@@ -78,6 +80,8 @@ huashan-lungu-web/
 │   └── src/
 │       ├── app/                 # App Router 页面
 │       │   ├── page.tsx           # 首页（三入口卡片）
+│       │   ├── short-term/page.tsx # 短线分析入口页
+│       │   ├── short-term/[taskId]/page.tsx # 短线任务详情 / 轮询页
 │       │   ├── masters/page.tsx   # 大师百科（Server Component，用 API_BASE_INTERNAL）
 │       │   ├── debate/
 │       │   │   ├── single/page.tsx     # 单股入口
@@ -86,12 +90,15 @@ huashan-lungu-web/
 │       │   │   ├── select/page.tsx     # 选大师（pid query 参数）
 │       │   │   ├── [sid]/page.tsx      # ★ SSE 流式诊断页（见 §5）
 │       │   │   └── [sid]/report/page.tsx
-│       │   ├── share/[code]/page.tsx   # 分享链接页
+│       │   ├── share/[code]/page.tsx   # 论股报告分享链接页
+│       │   ├── share/short-term/[code]/page.tsx # 短线报告分享链接页
+│       │   ├── tasks/page.tsx      # 分析任务列表：论股 + 短线任务
 │       │   └── settings/
 │       │       ├── llm/page.tsx        # 配置 LLM Provider
 │       │       └── datasource/page.tsx # 查看数据源健康
 │       ├── components/
 │       │   ├── debate/          # AnalystCard/DebateStage/MasterTurn/RiskPanel/ProgressBar
+│       │   ├── short-term/      # ShortTermAnalysisResult：K 线图 + 关键价位 + 报告操作
 │       │   ├── report/          # DiagnosisReportView（最终报告渲染）
 │       │   ├── portfolio/       # StockAutocomplete/HoldingsTable/ManualHoldingRow/ImageOcrTab
 │       │   ├── settings/        # ProviderCard
@@ -100,6 +107,8 @@ huashan-lungu-web/
 │       │   ├── api.ts           # apiGet/apiPost（同源代理走 Next rewrites）
 │       │   ├── sse.ts           # openSSE 封装 EventSource
 │       │   ├── diagnosis-api.ts # 诊断相关 API
+│       │   ├── short-term-api.ts    # 短线分析 API
+│       │   ├── short-term-report.ts # 短线分析 Markdown/PDF 导出模板
 │       │   ├── portfolio-api.ts # 持仓解析 + 股票搜索
 │       │   ├── llm-api.ts       # Provider 元 + 连通性测试
 │       │   ├── llm-config.ts    # LLM 配置 localStorage 读写
@@ -108,7 +117,7 @@ huashan-lungu-web/
 │       │   └── cn.ts            # clsx + tailwind-merge
 │       ├── stores/llm.ts        # zustand store（wrap localStorage）
 │       └── styles/globals.css
-└── skills/huashan-lungu-v2 → (symlink 到兄弟目录的 skill 仓库；prompt 源)
+└── skills/huashan-lungu-v2/  # 随仓库发布的 skill 与 prompt 源
 ```
 
 ## 4. 核心流程：6-Step 诊断
@@ -198,6 +207,8 @@ report.ready              # 报告就绪
 | `portfolios` | `id UUID pk`, `anon_id fk`, `holdings_json JSONB`, `raw_input` | 每次解析存一份，`holdings_json = {mode, holdings: [{code,name,...valid}], overview}` |
 | `diagnoses` | `id UUID pk`, `portfolio_id fk`, `anon_id fk`, `mode`, `masters: ARRAY<str>`, `status`, `events_jsonb JSONB`, `report_json JSONB`, `error_message`, `finished_at` | 事件流水 + 最终报告都在这一行 |
 | `share_links` | `code str pk`, `diagnosis_id fk`, `expires_at`, `visit_count` | 10 字符随机 code |
+| `short_term_analysis_tasks` | `id UUID pk`, `anon_id fk`, `code`, `name`, `status`, `report_json JSONB`, `error_message`, `finished_at` | 短线分析任务和最终报告 |
+| `short_term_share_links` | `code str pk`, `task_id fk`, `expires_at`, `visit_count` | 短线报告分享链接 |
 
 启动时会执行 `Base.metadata.create_all`（开发期够用；生产要上 alembic 再加迁移）。也会把上次进行中的 `pending/running` 标记为 `failed`——避免"假活"。
 
@@ -224,6 +235,9 @@ report.ready              # 报告就绪
 | 改进度条权重 | `frontend/src/components/debate/ProgressBar.tsx::WEIGHTS` |
 | 加新页面 | `frontend/src/app/xxx/page.tsx`（App Router 文件路由） |
 | 改首页三入口 | `frontend/src/app/page.tsx::ENTRIES` |
+| 改短线分析逻辑 | `backend/app/services/short_term.py` + `docs/SHORT_TERM_ANALYSIS.md` |
+| 改短线 K 线图 / 支撑压力展示 | `frontend/src/components/short-term/ShortTermAnalysisResult.tsx` + `frontend/src/lib/short-term-report.ts` |
+| 改短线任务 / 分享 API | `backend/app/api/short_term.py` + `frontend/src/lib/short-term-api.ts` |
 | 调整 DB schema | `backend/app/models/xxx.py` + 在 `app/main.py::lifespan` 之前考虑是否需要 alembic |
 | 调整限流策略 | `backend/app/api/diagnosis.py::_check_daily_limit` + `config.py::rate_limit_per_day` |
 | 加缓存策略 | `backend/app/data/cache.py`（key 前缀 `hs:data:`） |
@@ -232,10 +246,45 @@ report.ready              # 报告就绪
 ## 9. 已知 TODO / 坑
 
 - [ ] `ShareLink.expires_at` 逻辑存在但前端 UI 没暴露（`createShareLink` 不传 `expires_days`）
-- [ ] 港股支持未实现（目前 `detect_exchange` 只返回 sh/sz/bj）
 - [ ] OCR 离线包未落地（目前 Tesseract.js 从 unpkg CDN 加载）
 - [ ] `DiagnosisReportView` 对 `risk[key]` 还做了旧版 string 兼容（`renderText`），新结构定型后可以删
 - [ ] 大师辩论是**串行**的，总耗时 ≈ 大师数 × 轮数 × 单次 LLM 用时——进度条里权重 12 就是认了这个慢
-- [ ] 首页 / README 写的 "19 位" 与代码里 16 位不一致
 - [ ] `Diagnosis.status` 的文本值在代码里同时出现过 `"single" | "batch" | "portfolio"` 和 schemas 里的 `Literal["pending","running","done","failed"]`——看清楚在指 mode 还是 status
 - [ ] lifespan 里 `create_all` 会在生产冲突；迁移到 alembic 是第一步
+
+## 10. 短线分析模块
+
+入口：
+
+- 前端：`/short-term`
+- 后端：`/api/short-term/*`
+- 维护说明：[docs/SHORT_TERM_ANALYSIS.md](./docs/SHORT_TERM_ANALYSIS.md)
+
+核心流程：
+
+```
+用户选择 A 股
+  → POST /api/short-term/start
+  → 立即创建 short_term_analysis_tasks running 记录
+  → 后台 akshare 拉前复权日线
+  → 计算 MA / MACD / RSI / 量能 / 周线摘要
+  → 生成 snapshot + levels + chart + rule context
+  → 复用当前 LLM Provider 输出 ai_analysis
+  → report_json 落库
+  → 前端轮询 /api/short-term/{task_id} 展示结果
+```
+
+前端行为：
+
+- 控制台侧栏有「短线分析」入口。
+- 最近股票模块合并论股历史和短线历史；开始分析后隐藏，完成或失败后恢复。
+- `/tasks` 同时展示论股任务和短线任务；短线任务完成后支持查看、下载、分享。
+- 短线报告页面和分享页共用 `ShortTermAnalysisResult`。
+
+K 线展示规则：
+
+- 页面和 PDF 都展示近一年 K 线，叠加 MA20 / MA60。
+- 图上只突出核心支撑区和压力区，不画全部均线价位和高低点。
+- 支撑使用橙色，压力使用绿色。
+- 多个相近价位合并为一个区间色带；远离价位不强行合并。
+- 如果修改图表或价位聚类，必须同步页面组件和 PDF 打印模板。

@@ -16,7 +16,9 @@ git check-ignore -v .env frontend/node_modules frontend/.next-dev frontend/.next
 - `.next/`、`.next-dev/`、`.next-build/`
 - `backend/.venv/`
 - 数据库、缓存、日志文件
-- 本地绝对路径软链 `skills/huashan-lungu-v2`
+- 指向仓库外部的本地绝对路径软链
+
+同时确认 `skills/huashan-lungu-v2/references/masters.md` 已被 Git 跟踪；它是后端运行时依赖。
 
 ## 2. 本地验证
 
