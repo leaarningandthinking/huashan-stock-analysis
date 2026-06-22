@@ -29,6 +29,8 @@ HK_CODE_RE = re.compile(r"^\d{1,5}(?:\.HK)?$", re.IGNORECASE)
 US_CODE_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$", re.IGNORECASE)
 ALL_CODES_KEY = "symbols:a_share:all"
 ALL_CODES_TTL = 60 * 60 * 24  # 1 天
+ALL_HK_CODES_KEY = "symbols:hk:all"
+ALL_HK_CODES_TTL = 60 * 60 * 24  # 1 天
 YF_SEARCH_TTL = 60 * 60 * 6
 
 Exchange = Literal["sh", "sz", "bj", "hk", "us"]
@@ -110,6 +112,28 @@ async def fetch_all_codes() -> list[dict]:
         if str(row.get("code", "")).strip()
     ]
     await cache_set(ALL_CODES_KEY, items, ALL_CODES_TTL)
+    return items
+
+
+async def fetch_all_hk_codes() -> list[dict]:
+    """拉全量港股代码 + 名字。Redis 缓存 1 天。
+
+    返回: [{"code": "0700.HK", "name": "腾讯控股", "exchange": "hk"}, ...]
+    用于 OCR / 文本路径按名字反查港股代码（同花顺持仓页只显示名字不显示代码）。
+    """
+    cached = await cache_get(ALL_HK_CODES_KEY)
+    if cached is not None:
+        return cached
+
+    df = await call(ak.stock_hk_spot_em)
+    items: list[dict] = []
+    for _, row in df.iterrows():
+        raw_code = str(row.get("代码", "")).strip()
+        name = str(row.get("名称", "")).strip()
+        if not raw_code or not name:
+            continue
+        items.append({"code": normalize_symbol(raw_code), "name": name, "exchange": "hk"})
+    await cache_set(ALL_HK_CODES_KEY, items, ALL_HK_CODES_TTL)
     return items
 
 

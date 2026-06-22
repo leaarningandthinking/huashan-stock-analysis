@@ -20,6 +20,8 @@ class DiagnosisStartRequest(BaseModel):
 class DiagnosisStartResponse(BaseModel):
     diagnosis_id: str
     stream_url: str
+    # Phase 8: 启动页预告(个性化摘要),无画像/偏好时为 None
+    personalization: dict | None = None
 
 
 class DiagnosisReportResponse(BaseModel):

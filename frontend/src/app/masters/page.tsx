@@ -44,6 +44,16 @@ export default function MastersPage() {
                   <h3 className="text-lg font-black text-ink-900">{m.name}</h3>
                   <p className="mt-1 text-xs font-semibold text-scarlet-600">{m.school_label}</p>
                   <p className="mt-2 text-sm leading-6 text-ink-500">{m.tagline}</p>
+                  {m.tags && m.tags.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {m.tags.map((tag) => (
+                        <span key={tag} className="rounded bg-ink-50 px-2 py-1 text-[11px] font-semibold text-ink-500">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {m.bio && <p className="mt-3 text-xs leading-5 text-ink-500">{m.bio}</p>}
                 </div>
               </article>
             ))}

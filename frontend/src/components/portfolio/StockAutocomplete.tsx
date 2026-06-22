@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { MousePointerClick } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { searchStocks, type StockInfo } from "@/lib/portfolio-api";
 import { cn } from "@/lib/cn";
@@ -101,7 +102,11 @@ export function StockAutocomplete({
         autoComplete="off"
       />
       {open && candidates.length > 0 && (
-        <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-md border border-ink-200 bg-white shadow-lg">
+        <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-lg border border-scarlet-200 bg-white shadow-xl ring-2 ring-scarlet-100">
+          <div className="flex items-center gap-2 border-b border-scarlet-100 bg-[#fff1ed] px-3 py-2 text-xs font-black text-scarlet-700">
+            <MousePointerClick className="h-4 w-4" />
+            请选择下方匹配的股票，选中后再进入下一步
+          </div>
           {candidates.map((s, idx) => (
             <button
               key={s.code}
@@ -109,13 +114,13 @@ export function StockAutocomplete({
               onClick={() => pick(s)}
               onMouseEnter={() => setActiveIdx(idx)}
               className={cn(
-                "flex w-full items-center justify-between px-3 py-2 text-sm text-ink-700",
-                idx === activeIdx ? "bg-ink-100" : "hover:bg-ink-50",
+                "flex w-full items-center justify-between border-b border-ink-100 px-4 py-3 text-sm text-ink-700 last:border-b-0",
+                idx === activeIdx ? "bg-[#fff7ed]" : "bg-white hover:bg-[#fffaf4]",
               )}
             >
-              <span className="font-mono text-xs text-ink-500">{s.code}</span>
-              <span className="ml-3 flex-1 text-left">{s.name}</span>
-              <span className="text-xs text-ink-400">{s.exchange.toUpperCase()}</span>
+              <span className="font-mono text-sm font-bold text-[#8a6f52]">{s.code}</span>
+              <span className="ml-3 flex-1 text-left font-bold text-ink-900">{s.name}</span>
+              <span className="rounded bg-ink-50 px-2 py-1 text-xs font-bold text-ink-500">{s.exchange.toUpperCase()}</span>
             </button>
           ))}
         </div>

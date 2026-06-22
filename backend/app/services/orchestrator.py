@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -32,6 +33,7 @@ class DiagnosisState(TypedDict, total=False):
     llm_config: dict
     mode: str
     model: str
+    anon_id: uuid.UUID | None
     ok_roles: list[str]
     analyst_results: dict[str, dict]
     report_card: str
@@ -59,6 +61,8 @@ async def _analysts_node(state: DiagnosisState) -> dict[str, Any]:
 
     await queue.emit("step.start", step=2, name="分析师团队")
 
+    anon_id = state.get("anon_id")
+
     async def safe_run(role: str) -> dict:
         try:
             return await run_analyst(
@@ -67,6 +71,7 @@ async def _analysts_node(state: DiagnosisState) -> dict[str, Any]:
                 queue=queue,
                 llm=_build_llm(llm_config),
                 model=model,
+                anon_id=anon_id,
             )
         except Exception as e:
             logger.exception("analyst %s failed", role)
@@ -150,6 +155,7 @@ async def _master_debate_node(state: DiagnosisState) -> dict[str, Any]:
             llm=_build_llm(state["llm_config"]),
             model=state["model"],
             rounds=2,
+            anon_id=state.get("anon_id"),
         )
         await queue.emit("step.done", step=4, turns=len(debate_result["transcript"]))
     except Exception as e:
@@ -175,6 +181,7 @@ async def _risk_review_node(state: DiagnosisState) -> dict[str, Any]:
             llm=_build_llm(state["llm_config"]),
             model=state["model"],
             mode=state.get("mode", "portfolio"),
+            anon_id=state.get("anon_id"),
         )
         await queue.emit("step.done", step=5, schools=list(risk_results.keys()))
     except Exception as e:
@@ -291,12 +298,16 @@ async def run_diagnosis_w5a(
     masters: list[str],
     llm_config: dict,
     mode: str = "portfolio",
+    anon_id: uuid.UUID | None = None,
 ) -> dict:
     """运行诊断 StateGraph。
 
     Graph:
     analysts -> research_manager -> master_debate -> risk_review ->
     investment_manager -> report_summary -> finalize
+
+    anon_id 用于 L3 偏好 + L4 画像注入到 analysts / risk / debate 的 system prompt。
+    传 None 时行为与改造前完全一致。
     """
     try:
         valid_holdings = [holding for holding in holdings if holding.get("valid")]
@@ -324,6 +335,7 @@ async def run_diagnosis_w5a(
                 "llm_config": llm_config,
                 "mode": mode,
                 "model": llm_config["model"],
+                "anon_id": anon_id,
             }
         )
         return final_state.get("report", {"status": "failed"})

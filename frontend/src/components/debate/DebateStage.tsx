@@ -1,13 +1,16 @@
 "use client";
 
 import { MasterTurn, type MasterTurnData } from "./MasterTurn";
+import { type RevisionInfo } from "./AnalystCard";
 
 interface Props {
   turns: MasterTurnData[];
   lineup: { slug: string; name: string; tagline?: string }[];
+  onReviseMaster?: (slug: string) => void;
+  revisionInfoByMaster?: Record<string, RevisionInfo>;
 }
 
-export function DebateStage({ turns, lineup }: Props) {
+export function DebateStage({ turns, lineup, onReviseMaster, revisionInfoByMaster }: Props) {
   if (turns.length === 0 && lineup.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-ink-300 bg-white/40 p-8 text-center text-sm text-ink-400">
@@ -48,6 +51,8 @@ export function DebateStage({ turns, lineup }: Props) {
             turn={t}
             index={idx}
             flip={idx % 2 === 1}
+            onRevise={onReviseMaster ? () => onReviseMaster(t.master) : undefined}
+            revisionInfo={revisionInfoByMaster?.[t.master]}
           />
         );
       })}

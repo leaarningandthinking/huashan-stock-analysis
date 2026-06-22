@@ -43,6 +43,7 @@ const DEFAULT_EVENTS = [
   "summary.done",
   "report.ready",
   "diagnosis.context",
+  "revise.start",
   "error",
 ] as const;
 

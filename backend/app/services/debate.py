@@ -10,11 +10,17 @@
 from __future__ import annotations
 
 import logging
+import uuid
 
 from app.core.sse import EventQueue
+from app.db import SessionLocal
 from app.llm.base import LLMClient, Message
 from app.prompts.loader import get_master_section
 from app.prompts.masters_persona import build_master_system_prompt
+from app.services.memory.profile_injector import (
+    inject_memory_into_prompt,
+    mark_preferences_applied,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +34,7 @@ async def run_debate(
     llm: LLMClient,
     model: str,
     rounds: int = 2,
+    anon_id: uuid.UUID | None = None,
 ) -> dict:
     """运行 N 轮辩论。
 
@@ -60,6 +67,18 @@ async def run_debate(
             except Exception as e:
                 logger.warning("build prompt failed for %s: %s", slug, e)
                 continue
+
+            # 注入 L3 偏好 + L4 画像(master:<slug> scope)
+            applied_pref_ids: list[uuid.UUID] = []
+            if anon_id is not None:
+                try:
+                    async with SessionLocal() as db:
+                        system_prompt, applied_pref_ids = await inject_memory_into_prompt(
+                            db, anon_id, f"master:{slug}", system_prompt
+                        )
+                except Exception:
+                    logger.exception("master %s inject memory failed; fall back", slug)
+                    applied_pref_ids = []
 
             await queue.emit(
                 "master.start",
@@ -132,6 +151,15 @@ async def run_debate(
                 "name": sec.name,
                 "text": full_text,
             })
+
+            # LLM 完成后回写偏好使用统计(失败也写,因为已经吐了部分文本)
+            if applied_pref_ids:
+                try:
+                    async with SessionLocal() as db:
+                        await mark_preferences_applied(db, applied_pref_ids)
+                except Exception:
+                    logger.exception("master %s mark_preferences_applied failed", slug)
+
             await queue.emit(
                 "master.done",
                 master=slug, round=round_idx,

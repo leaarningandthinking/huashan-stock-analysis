@@ -55,3 +55,22 @@ class LLMClient(ABC):
         """流式 chat。逐 token yield。"""
         raise NotImplementedError
         yield  # type: ignore[unreachable]
+
+    @abstractmethod
+    async def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        model: str,
+        *,
+        temperature: float = 0.3,
+        max_tokens: int = 2000,
+    ) -> dict:
+        """非流式 function calling。
+
+        messages 用 OpenAI 协议字典(含 role/content/tool_calls/tool_call_id),
+        不再用 Message dataclass,因为字段更多。
+
+        返回 {"content": str | None, "tool_calls": [...] | None}
+        """
+        raise NotImplementedError

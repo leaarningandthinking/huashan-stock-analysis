@@ -11,9 +11,22 @@ export interface DiagnosisStartRequest {
   };
 }
 
+export interface PersonalizationPreview {
+  preference_count: number;
+  preference_by_scope: { global: number; analyst: number; master: number; risk: number };
+  profile_version: number;
+  profile_summary: string | null;
+  is_first_diagnosis: boolean;
+}
+
 export interface DiagnosisStartResponse {
   diagnosis_id: string;
   stream_url: string;
+  personalization?: PersonalizationPreview | null;
+}
+
+export function getDiagnosisPreview(): Promise<PersonalizationPreview> {
+  return apiGet<PersonalizationPreview>("/api/profile/diagnosis_preview");
 }
 
 export interface DiagnosisReportResponse {

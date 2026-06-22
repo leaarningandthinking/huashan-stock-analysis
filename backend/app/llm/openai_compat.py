@@ -118,3 +118,50 @@ class OpenAICompatClient(LLMClient):
                     content = delta.get("content")
                     if content:
                         yield content
+
+    async def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        model: str,
+        *,
+        temperature: float = 0.3,
+        max_tokens: int = 2000,
+    ) -> dict:
+        """OpenAI function calling 协议。
+
+        兼容性:
+        - DeepSeek-V3 / V2.5:完全支持
+        - 星火 V3.5+:支持,arguments 偶尔非严格 JSON,调用方需做容错
+        - 通义千问 Plus / Max:支持
+        - LLM 不调工具直接出文本时,tool_calls=None,content 即最终回复
+
+        返回 {"content": str | None, "tool_calls": [...] | None}
+        """
+        url = f"{self.base_url}/chat/completions"
+        payload = {
+            "model": model,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": "auto",
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(url, headers=self._headers(), json=payload)
+            try:
+                r.raise_for_status()
+            except httpx.HTTPStatusError:
+                detail = r.text[:500]
+                raise RuntimeError(
+                    f"LLM API {r.status_code}: {detail}"
+                ) from None
+            data = r.json()
+
+        if not data.get("choices"):
+            return {"content": None, "tool_calls": None}
+        choice = data["choices"][0].get("message", {})
+        return {
+            "content": choice.get("content"),
+            "tool_calls": choice.get("tool_calls"),
+        }

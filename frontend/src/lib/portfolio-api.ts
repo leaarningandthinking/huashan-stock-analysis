@@ -21,6 +21,8 @@ export interface ParseRequest {
   manual?: ManualHolding[];
   text?: string;
   codes?: string[];
+  /** 截图来源（仅 text 路径用）：auto 自动判别 / ths 同花顺 / generic 通用 */
+  source?: "auto" | "ths" | "generic";
 }
 
 export interface HoldingItem {

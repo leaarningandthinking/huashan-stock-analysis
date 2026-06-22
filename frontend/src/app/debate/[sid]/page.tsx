@@ -1,18 +1,25 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { CheckCircle2, Circle, Loader2 } from "lucide-react";
+import { CheckCircle2, Circle, Clock3, Loader2 } from "lucide-react";
 import { openSSE } from "@/lib/sse";
-import { AnalystCard, type AnalystStatus } from "@/components/debate/AnalystCard";
+import { AnalystCard, type AnalystStatus, type RevisionInfo } from "@/components/debate/AnalystCard";
 import { DebateStage } from "@/components/debate/DebateStage";
 import { ProgressBar } from "@/components/debate/ProgressBar";
 import type { MasterTurnData } from "@/components/debate/MasterTurn";
 import { RiskPanel, type RiskSchool, type RiskState } from "@/components/debate/RiskPanel";
 import { apiGet, type MasterSummary } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { getDiagnosisReport, type DiagnosisReportResponse } from "@/lib/diagnosis-api";
+import {
+  getDiagnosisPreview,
+  getDiagnosisReport,
+  type DiagnosisReportResponse,
+  type PersonalizationPreview,
+} from "@/lib/diagnosis-api";
+import { ReviseChat } from "@/components/revise/ReviseChat";
+import { useReportViewedTracker } from "@/lib/signals";
 
 const ANALYST_ROLES = ["fundamental", "sentiment", "news", "technical"] as const;
 type Role = (typeof ANALYST_ROLES)[number];
@@ -103,6 +110,9 @@ export default function DiagnosisStreamPage() {
   const params = useParams<{ sid: string }>();
   const sid = params.sid;
 
+  // Phase 5: 报告页停留时长自动埋点(report_viewed 信号)
+  useReportViewedTracker(sid);
+
   const [steps, setSteps] = useState<StepInfo[]>(INITIAL_STEPS);
   const [diagnosisContext, setDiagnosisContext] = useState<DiagnosisContext | null>(null);
   const [analysts, setAnalysts] = useState<Record<Role, AnalystState>>({
@@ -123,7 +133,36 @@ export default function DiagnosisStreamPage() {
     text: "",
   });
   const [reportReady, setReportReady] = useState<any>(null);
+  const [revisionState, setRevisionState] = useState<{
+    inProgress: boolean;
+    completedAt?: number;
+    revisionCount?: number;
+  }>({ inProgress: false });
+  // F3 段落级修订徽章状态
+  const [analystRev, setAnalystRev] = useState<Record<string, RevisionInfo>>({});
+  const [masterRev, setMasterRev] = useState<Record<string, RevisionInfo>>({});
+  const [riskRev, setRiskRev] = useState<Record<string, RevisionInfo>>({});
+  // 本轮修订估算版本号(report.ready 到达后校正)
+  const nextRevVerRef = useRef(1);
+  const [personalization, setPersonalization] = useState<PersonalizationPreview | null>(null);
+  // F1: 内嵌"调整"按钮 → 给 ReviseChat 传上下文
+  const [reviseContext, setReviseContext] = useState<{ section: string; stock?: string } | null>(null);
+  const [reviseTriggerNonce, setReviseTriggerNonce] = useState(0);
   const [globalError, setGlobalError] = useState<string | null>(null);
+
+  // F6: 启动页预告 - 一次性拉个性化摘要
+  useEffect(() => {
+    if (!sid) return;
+    getDiagnosisPreview()
+      .then(setPersonalization)
+      .catch(() => {});
+  }, [sid]);
+
+  // F1: 段落"调整"按钮回调
+  const openReviseWith = useCallback((ctx: { section: string; stock?: string }) => {
+    setReviseContext(ctx);
+    setReviseTriggerNonce((n) => n + 1);
+  }, []);
   const lastAppliedEventIdRef = useRef(0);
   const lastProgressAtRef = useRef(Date.now());
   // 大师目录用 ref 保存，避免触发 SSE useEffect 重连
@@ -320,6 +359,45 @@ export default function DiagnosisStreamPage() {
           [data.analyst]: { ...a[data.analyst as Role], status: "done" },
         }));
         break;
+      case "analyst.start":
+        if (revisionState.inProgress) {
+          setAnalystRev((p) => ({ ...p, [data.analyst]: { mode: "revising" } }));
+        }
+        break;
+      case "analyst.done":
+        if (revisionState.inProgress) {
+          setAnalystRev((p) => ({
+            ...p,
+            [data.analyst]: { mode: "revised", version: nextRevVerRef.current },
+          }));
+        }
+        break;
+      case "master.start":
+        if (revisionState.inProgress) {
+          setMasterRev((p) => ({ ...p, [data.master]: { mode: "revising" } }));
+        }
+        break;
+      case "master.done":
+        if (revisionState.inProgress) {
+          setMasterRev((p) => ({
+            ...p,
+            [data.master]: { mode: "revised", version: nextRevVerRef.current },
+          }));
+        }
+        break;
+      case "risk.start":
+        if (revisionState.inProgress) {
+          setRiskRev((p) => ({ ...p, [data.school]: { mode: "revising" } }));
+        }
+        break;
+      case "risk.done":
+        if (revisionState.inProgress) {
+          setRiskRev((p) => ({
+            ...p,
+            [data.school]: { mode: "revised", version: nextRevVerRef.current },
+          }));
+        }
+        break;
       case "analyst.fail":
         setAnalysts((a) => ({
           ...a,
@@ -417,6 +495,34 @@ export default function DiagnosisStreamPage() {
         break;
       case "report.ready":
         setReportReady(data);
+        if (data?.revised) {
+          const ver: number = data.revision_count ?? nextRevVerRef.current;
+          setRevisionState({
+            inProgress: false,
+            completedAt: Date.now(),
+            revisionCount: ver,
+          });
+          // 把所有 revising/已 revised 状态校正到本轮 ver
+          const fix = (rec: Record<string, RevisionInfo>): Record<string, RevisionInfo> => {
+            const next: Record<string, RevisionInfo> = {};
+            for (const [k, v] of Object.entries(rec)) {
+              if (!v) continue;
+              next[k] = { mode: "revised", version: ver };
+            }
+            return next;
+          };
+          setAnalystRev(fix);
+          setMasterRev(fix);
+          setRiskRev(fix);
+        }
+        break;
+      case "revise.start":
+        nextRevVerRef.current = (revisionState.revisionCount ?? 0) + 1;
+        setRevisionState({ inProgress: true });
+        // 清空旧的 revised(让用户能看到这一轮修订的进度)
+        setAnalystRev({});
+        setMasterRev({});
+        setRiskRev({});
         break;
       case "error":
         if (data) {
@@ -438,9 +544,9 @@ export default function DiagnosisStreamPage() {
         if (numericEventId) lastAppliedEventIdRef.current = numericEventId;
         applyDiagnosisEvent(eventType, data);
       }
-      if (eventType === "report.ready") {
-        client.close();
-      }
+      // 不在 report.ready 时 close —— 修订重跑会再次产生 revise.start →
+      // analyst.* → report.ready (revised:true) 等事件,前端要持续监听。
+      // 离开页面时 useEffect cleanup 自然会 close。
     });
     return () => {
       client.close();
@@ -456,6 +562,8 @@ export default function DiagnosisStreamPage() {
         会话 ID：<span className="font-mono text-ink-400">{sid}</span>
       </p>
 
+      <PersonalizationCard preview={personalization} />
+      <EstimatedTimeNotice steps={steps} />
       <ProgressBar steps={steps} />
       <div className="mt-3">
         <StepProgress steps={steps} />
@@ -464,6 +572,19 @@ export default function DiagnosisStreamPage() {
       {globalError && (
         <div className="my-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {globalError}
+        </div>
+      )}
+
+      {revisionState.inProgress && (
+        <div className="my-4 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>正在按你的最新偏好重新分析…(只重跑受影响的环节)</span>
+        </div>
+      )}
+
+      {!revisionState.inProgress && revisionState.completedAt && (
+        <div className="my-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          ✨ 修订完成 · v{revisionState.revisionCount ?? "?"} — 下方报告已更新
         </div>
       )}
 
@@ -477,6 +598,8 @@ export default function DiagnosisStreamPage() {
               status={analysts[r].status}
               text={analysts[r].text}
               stockCount={analysts[r].stockCount}
+              onRevise={() => openReviseWith({ section: `analyst.${r}` })}
+              revisionInfo={analystRev[r]}
             />
           ))}
         </div>
@@ -500,12 +623,21 @@ export default function DiagnosisStreamPage() {
 
       <section className="mt-8">
         <h2 className="mb-3 text-lg font-semibold text-ink-700">大师圆桌观点</h2>
-        <DebateStage turns={turns} lineup={lineup} />
+        <DebateStage
+          turns={turns}
+          lineup={lineup}
+          onReviseMaster={(slug) => openReviseWith({ section: `master.${slug}` })}
+          revisionInfoByMaster={masterRev}
+        />
       </section>
 
       <section className="mt-8">
         <h2 className="mb-3 text-lg font-semibold text-ink-700">风控审核</h2>
-        <RiskPanel states={riskStates} />
+        <RiskPanel
+          states={riskStates}
+          onRevise={(school) => openReviseWith({ section: `risk.${school}` })}
+          revisionInfoBySchool={riskRev}
+        />
       </section>
 
       <section className="mt-8">
@@ -525,20 +657,118 @@ export default function DiagnosisStreamPage() {
       </section>
 
       {reportReady && (
-        <section className="mt-8 rounded-md border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-800">
-          <p className="font-medium">
-            报告就绪 · {reportReady.master_count ?? 0} 轮发言 · {reportReady.risk_count ?? 0} 派风控
-            {reportReady.has_research_manager ? " · 投研经理已完成分析" : ""}
-            {reportReady.has_manager ? " · 投资经理已决策" : ""}
-          </p>
-          <p className="mt-1 text-xs text-emerald-700">
-            <Link href={`/debate/${sid}/report`} className="underline hover:text-emerald-900">
-              查看完整结构化报告
-            </Link>
-          </p>
-        </section>
+        <>
+          <section className="mt-8 rounded-md border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-800">
+            <p className="font-medium">
+              报告就绪 · {reportReady.master_count ?? 0} 轮发言 · {reportReady.risk_count ?? 0} 派风控
+              {reportReady.has_research_manager ? " · 投研经理已完成分析" : ""}
+              {reportReady.has_manager ? " · 投资经理已决策" : ""}
+            </p>
+            <p className="mt-1 text-xs text-emerald-700">
+              <Link href={`/debate/${sid}/report`} className="underline hover:text-emerald-900">
+                查看完整结构化报告
+              </Link>
+            </p>
+          </section>
+
+          {/* 引导 CTA:让东方不败出手 */}
+          <section className="mt-4 overflow-hidden rounded-lg border border-amber-200 bg-gradient-to-r from-amber-50 to-scarlet-50 p-5 shadow-sm">
+            <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+              <div>
+                <p className="text-base font-semibold text-ink-800">
+                  🗡️ 这份诊股看不顺眼?让东方不败收拾一下。
+                </p>
+                <p className="mt-1 text-sm text-ink-600">
+                  把你的判断丢给他 —— 他懒散但专业,会先看清原文、再提议偏好、等你说「确认」才动手。
+                  <br />
+                  说过的话<strong>永久生效</strong>,以后每次诊股自动按你的口味来,他懒得每次都问。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent("revise:open"))}
+                className="shrink-0 rounded-lg border border-amber-700/30 bg-ink-800 px-5 py-2.5 text-sm font-medium text-amber-100 shadow-md transition-all hover:bg-ink-700 hover:shadow-lg"
+              >
+                🗡️ 召唤东方不败
+                <span className="ml-2 text-xs opacity-70">⌘+I</span>
+              </button>
+            </div>
+            <p className="mt-3 text-xs text-ink-500">
+              提示:从每段分析右上角的 [💬 调整] 按钮进入,他会自动锁定到那段
+            </p>
+          </section>
+        </>
       )}
+
+      {/* 修订对话:始终显示。诊股未完成时后端会返回 400,前端会在 ReviseChat 内显示错误 */}
+      <ReviseChat sid={sid} externalContext={reviseContext} triggerNonce={reviseTriggerNonce} />
     </main>
+  );
+}
+
+function PersonalizationCard({ preview }: { preview: PersonalizationPreview | null }) {
+  if (!preview) return null;
+  const { preference_count, preference_by_scope, profile_version, profile_summary, is_first_diagnosis } = preview;
+
+  if (is_first_diagnosis) {
+    return (
+      <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-800">
+        🌱 这是你的<strong>第一次诊股</strong>。系统会根据本次结果开始学习你的偏好,后续诊股将逐步千人千面。
+      </div>
+    );
+  }
+  if (preference_count === 0 && profile_version === 0) return null;
+
+  return (
+    <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50/70 px-4 py-3 text-sm text-blue-900">
+      <p className="font-medium">为你启动个性化诊股</p>
+      {preference_count > 0 && (
+        <p className="mt-1 text-xs">
+          📋 将应用你的 <strong>{preference_count}</strong> 条偏好
+          {(preference_by_scope.analyst > 0 || preference_by_scope.master > 0 || preference_by_scope.risk > 0) && (
+            <>
+              {" "}
+              ({preference_by_scope.analyst > 0 && <>{preference_by_scope.analyst} 条针对分析师</>}
+              {preference_by_scope.master > 0 && <>{preference_by_scope.analyst > 0 ? "、" : ""}{preference_by_scope.master} 条针对大师</>}
+              {preference_by_scope.risk > 0 && <>{preference_by_scope.analyst + preference_by_scope.master > 0 ? "、" : ""}{preference_by_scope.risk} 条针对风控</>})
+            </>
+          )}
+        </p>
+      )}
+      {profile_version > 0 && (
+        <p className="mt-1 text-xs">
+          🧠 已加载你的画像 <strong>v{profile_version}</strong>
+          {profile_summary && <span className="ml-1 text-blue-700">— {profile_summary}</span>}
+        </p>
+      )}
+      <p className="mt-1 text-xs text-blue-700">
+        <Link href="/settings/agent" className="underline hover:text-blue-900">
+          查看完整画像 →
+        </Link>
+      </p>
+    </div>
+  );
+}
+
+function EstimatedTimeNotice({ steps }: { steps: StepInfo[] }) {
+  const allDone = steps.every((s) => s.status === "done" || s.status === "skipped");
+  if (allDone) return null;
+
+  const currentStep = steps.find((s) => s.status === "running");
+
+  return (
+    <div className="mb-3 flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-ink-700 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start gap-3">
+        <Clock3 className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+        <div>
+          <p className="font-black text-ink-900">预计生成报告时间：5-10 分钟</p>
+          <p className="mt-1 text-xs leading-5 text-ink-500">
+            当前{currentStep ? `正在执行「${currentStep.name}」` : "等待任务开始"}，多股票或大师轮次较多时可能略久。
+          </p>
+        </div>
+      </div>
+      <span className="w-fit rounded-md bg-white px-3 py-1 text-xs font-bold text-amber-800">可停留本页等待自动更新</span>
+    </div>
   );
 }
 

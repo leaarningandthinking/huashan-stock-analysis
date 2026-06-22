@@ -7,14 +7,20 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 
 from app.core.sse import EventQueue
 from app.data.fundamentals import get_financial_abstract, get_industry_valuation, get_valuation
 from app.data.news import get_market_signal_news, get_news
 from app.data.sentiment import get_sentiment
 from app.data.technical import get_technical
+from app.db import SessionLocal
 from app.llm.base import LLMClient, Message
 from app.prompts.analysts import ANALYST_LABELS, SYSTEM_PROMPTS
+from app.services.memory.profile_injector import (
+    inject_memory_into_prompt,
+    mark_preferences_applied,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -191,18 +197,35 @@ async def run_analyst(
     queue: EventQueue,
     llm: LLMClient,
     model: str,
+    anon_id: uuid.UUID | None = None,
 ) -> dict:
     """运行一个分析师。
     - holdings: list of {code, name}（valid only），按持仓清单逐个分析
     - 每个 token 通过 queue.emit('analyst.delta')
     - 完成后 emit 'analyst.done' 并返回 summary
+    - anon_id 不为 None 时,system prompt 末尾会注入用户偏好 + 顶部注入用户画像。
     """
     label = ANALYST_LABELS[role]
     await queue.emit("analyst.start", analyst=role, label=label,
                      stocks=[{"code": h["code"], "name": h["name"]} for h in holdings])
 
+    # 一次性注入 L3 偏好 + L4 画像
+    system_prompt = SYSTEM_PROMPTS[role]
+    applied_pref_ids: list[uuid.UUID] = []
+    if anon_id is not None:
+        try:
+            async with SessionLocal() as db:
+                system_prompt, applied_pref_ids = await inject_memory_into_prompt(
+                    db, anon_id, f"analyst:{role}", SYSTEM_PROMPTS[role]
+                )
+        except Exception:
+            logger.exception("[%s] inject memory failed; fall back to base prompt", role)
+            system_prompt = SYSTEM_PROMPTS[role]
+            applied_pref_ids = []
+
     full_text_parts: list[str] = []
     show_stock_heading = len(holdings) > 1
+    any_llm_success = False
 
     for h in holdings:
         code, name = h["code"], h["name"]
@@ -219,7 +242,7 @@ async def run_analyst(
             continue
 
         messages = [
-            Message(role="system", content=SYSTEM_PROMPTS[role]),
+            Message(role="system", content=system_prompt),
             Message(role="user", content=card),
         ]
 
@@ -229,11 +252,20 @@ async def run_analyst(
                 full_text_parts.append(delta)
                 await queue.emit("analyst.delta", analyst=role, text=delta)
                 chunk_count += 1
+            any_llm_success = True
         except Exception as e:
             logger.warning("[%s] LLM stream failed for %s: %s", role, code, e)
             err = f"\n\n⚠️ LLM 调用失败：{type(e).__name__}: {str(e)[:120]}\n"
             full_text_parts.append(err)
             await queue.emit("analyst.delta", analyst=role, text=err)
+
+    # LLM 至少跑通一只票才回写偏好使用统计(失败的不计数)
+    if any_llm_success and applied_pref_ids:
+        try:
+            async with SessionLocal() as db:
+                await mark_preferences_applied(db, applied_pref_ids)
+        except Exception:
+            logger.exception("[%s] mark_preferences_applied failed", role)
 
     summary = "".join(full_text_parts)
     await queue.emit("analyst.done", analyst=role, label=label,

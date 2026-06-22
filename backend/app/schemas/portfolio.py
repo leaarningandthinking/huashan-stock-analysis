@@ -20,6 +20,8 @@ class PortfolioParseRequest(BaseModel):
     text: str | None = None
     # 单股 / 批量 模式只有代码列表
     codes: list[str] | None = None
+    # 截图来源（仅 text 路径用）：auto 自动判别 / ths 同花顺 / generic 通用
+    source: Literal["auto", "ths", "generic"] | None = None
 
 
 class HoldingItem(BaseModel):

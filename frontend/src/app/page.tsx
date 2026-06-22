@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   ArrowRight,
+  Activity,
   Briefcase,
   CandlestickChart,
   Layers3,
@@ -16,6 +17,13 @@ const PRIMARY_ACTIONS = [
     desc: "输入一只股票，由分析师起报告，再组织大师辩论给出多空诊断。",
     icon: CandlestickChart,
     accent: "text-scarlet-600",
+  },
+  {
+    href: "/short-term",
+    title: "短线分析",
+    desc: "选一只股票，按趋势、量能、动量和关键价位生成短线观察计划。",
+    icon: Activity,
+    accent: "text-sky-700",
   },
   {
     href: "/debate/portfolio",
@@ -64,7 +72,7 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             {PRIMARY_ACTIONS.map(({ href, title, desc, icon: Icon, accent }) => (
               <Link
                 key={href}

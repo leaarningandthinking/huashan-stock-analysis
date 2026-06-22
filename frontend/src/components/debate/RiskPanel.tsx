@@ -2,6 +2,7 @@
 
 import { Loader2, CheckCircle2, Circle } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { RevisionBadge, type RevisionInfo } from "./AnalystCard";
 
 export type RiskSchool = "aggressive" | "conservative";
 export type RiskStatus = "pending" | "running" | "done" | "fail";
@@ -28,9 +29,11 @@ const ORDER: RiskSchool[] = ["aggressive", "conservative"];
 
 interface Props {
   states: Record<RiskSchool, RiskState>;
+  onRevise?: (school: RiskSchool) => void;
+  revisionInfoBySchool?: Partial<Record<RiskSchool, RevisionInfo>>;
 }
 
-export function RiskPanel({ states }: Props) {
+export function RiskPanel({ states, onRevise, revisionInfoBySchool }: Props) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       {ORDER.map((school) => {
@@ -42,11 +45,26 @@ export function RiskPanel({ states }: Props) {
             className={cn("rounded-lg border-l-4 p-4 shadow-sm", m.color)}
           >
             <div className="mb-2 flex items-center justify-between text-sm">
-              <h4 className="font-semibold text-ink-800">
-                <span className="mr-1 text-base">{m.icon}</span>
-                {m.label}
-              </h4>
-              <StatusIcon status={s.status} />
+              <div className="flex items-center gap-2">
+                <h4 className="font-semibold text-ink-800">
+                  <span className="mr-1 text-base">{m.icon}</span>
+                  {m.label}
+                </h4>
+                <RevisionBadge info={revisionInfoBySchool?.[school]} />
+              </div>
+              <div className="flex items-center gap-2">
+                {onRevise && s.status === "done" && (
+                  <button
+                    type="button"
+                    onClick={() => onRevise(school)}
+                    title={`对 ${m.label} 的建议有异议?调整`}
+                    className="rounded-full px-2 py-0.5 text-xs text-ink-500 hover:bg-amber-100 hover:text-amber-800"
+                  >
+                    💬 调整
+                  </button>
+                )}
+                <StatusIcon status={s.status} />
+              </div>
             </div>
             <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-ink-700">
               {s.text || (

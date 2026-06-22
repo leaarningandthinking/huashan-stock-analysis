@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { Loader2, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { RevisionBadge, type RevisionInfo } from "./AnalystCard";
 
 export interface MasterTurnData {
   master: string;
@@ -28,9 +29,11 @@ interface Props {
   turn: MasterTurnData;
   index: number;
   flip?: boolean; // 左右交替排版
+  onRevise?: () => void;
+  revisionInfo?: RevisionInfo;
 }
 
-export function MasterTurn({ turn, index, flip }: Props) {
+export function MasterTurn({ turn, index, flip, onRevise, revisionInfo }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (ref.current && !turn.done) {
@@ -78,12 +81,25 @@ export function MasterTurn({ turn, index, flip }: Props) {
             <span className="rounded bg-white/70 px-1.5 py-0.5 text-ink-500">
               第 {turn.round} 轮
             </span>
+            <RevisionBadge info={revisionInfo} />
           </div>
-          {turn.done ? (
-            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-          ) : (
-            <Loader2 className="h-4 w-4 animate-spin text-scarlet-600" />
-          )}
+          <div className="flex items-center gap-2">
+            {onRevise && turn.done && (
+              <button
+                type="button"
+                onClick={onRevise}
+                title={`对 ${turn.name} 的发言有异议?调整`}
+                className="rounded-full px-2 py-0.5 text-xs text-ink-500 hover:bg-amber-100 hover:text-amber-800"
+              >
+                💬 调整
+              </button>
+            )}
+            {turn.done ? (
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            ) : (
+              <Loader2 className="h-4 w-4 animate-spin text-scarlet-600" />
+            )}
+          </div>
         </div>
         <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-ink-700">
           {turn.text}

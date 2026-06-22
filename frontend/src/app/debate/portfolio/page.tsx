@@ -9,7 +9,7 @@ import {
   ManualHoldingRow,
   type ManualRow,
 } from "@/components/portfolio/ManualHoldingRow";
-import { HoldingsTable } from "@/components/portfolio/HoldingsTable";
+import { HoldingsTable, type EditedHolding } from "@/components/portfolio/HoldingsTable";
 import { ImageOcrTab } from "@/components/portfolio/ImageOcrTab";
 import {
   listRecentPortfolios,
@@ -38,6 +38,7 @@ export default function PortfolioEntryPage() {
   ]);
   const [text, setText] = useState("");
   const [ocrText, setOcrText] = useState("");
+  const [ocrSource, setOcrSource] = useState<"ths" | "generic">("generic");
   const [recentPortfolio, setRecentPortfolio] = useState<RecentPortfolio | null>(null);
   const [parsing, setParsing] = useState(false);
   const [recentLoading, setRecentLoading] = useState(true);
@@ -95,7 +96,7 @@ export default function PortfolioEntryPage() {
         if (!ocrText.trim()) {
           throw new Error("请先上传图片并完成 OCR 识别");
         }
-        res = await parsePortfolio({ mode: "portfolio", text: ocrText });
+        res = await parsePortfolio({ mode: "portfolio", text: ocrText, source: ocrSource });
       } else {
         throw new Error(`unknown tab: ${tab}`);
       }
@@ -110,6 +111,26 @@ export default function PortfolioEntryPage() {
   function handleNext() {
     if (parseResult) {
       router.push(`/debate/select?pid=${parseResult.portfolio_id}`);
+    }
+  }
+
+  // 预览表手动修正后保存：拼成「名称/代码 持仓 成本 市值」文本走解析，
+  // 后端重新核对代码、重算概览，并持久化为新的 portfolio。
+  async function handleSaveEdits(rows: EditedHolding[]) {
+    setError(null);
+    setParsing(true);
+    try {
+      const text = rows
+        .map((r) => [r.stock, r.shares, r.cost, r.value].map((s) => s.trim()).filter(Boolean).join(" "))
+        .filter((line) => line.trim())
+        .join("\n");
+      if (!text.trim()) throw new Error("至少保留一只股票");
+      const res = await parsePortfolio({ mode: "portfolio", text, source: "generic" });
+      setParseResult(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setParsing(false);
     }
   }
 
@@ -203,7 +224,14 @@ export default function PortfolioEntryPage() {
         </div>
       )}
 
-      {tab === "image" && <ImageOcrTab onTextExtracted={setOcrText} />}
+      {tab === "image" && (
+        <ImageOcrTab
+          onTextExtracted={(t, s) => {
+            setOcrText(t);
+            setOcrSource(s);
+          }}
+        />
+      )}
 
       {error && (
         <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -293,6 +321,8 @@ export default function PortfolioEntryPage() {
             holdings={parseResult.holdings}
             overview={parseResult.overview}
             warnings={parseResult.warnings}
+            saving={parsing}
+            onSave={handleSaveEdits}
           />
         </section>
       )}

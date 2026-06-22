@@ -13,14 +13,28 @@ const ROLE_META: Record<string, { label: string; color: string }> = {
   technical: { label: "技术分析师", color: "border-emerald-500" },
 };
 
+export type RevisionInfo =
+  | { mode: "revising" }
+  | { mode: "revised"; version: number }
+  | null;
+
 interface Props {
   role: string;
   status: AnalystStatus;
   text: string;
   stockCount?: number;
+  onRevise?: () => void;
+  revisionInfo?: RevisionInfo;
 }
 
-export function AnalystCard({ role, status, text, stockCount = 0 }: Props) {
+export function AnalystCard({
+  role,
+  status,
+  text,
+  stockCount = 0,
+  onRevise,
+  revisionInfo,
+}: Props) {
   const meta = ROLE_META[role] ?? { label: role, color: "border-ink-400" };
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -45,8 +59,21 @@ export function AnalystCard({ role, status, text, stockCount = 0 }: Props) {
           {stockCount > 0 && (
             <span className="text-xs text-ink-400">{stockCount} 只</span>
           )}
+          <RevisionBadge info={revisionInfo} />
         </div>
-        <StatusBadge status={status} />
+        <div className="flex items-center gap-2">
+          {onRevise && status === "done" && (
+            <button
+              type="button"
+              onClick={onRevise}
+              title="对这位分析师的判断有异议?调整"
+              className="rounded-full px-2 py-0.5 text-xs text-ink-500 hover:bg-amber-100 hover:text-amber-800"
+            >
+              💬 调整
+            </button>
+          )}
+          <StatusBadge status={status} />
+        </div>
       </div>
       <div
         ref={scrollRef}
@@ -89,4 +116,24 @@ function StatusBadge({ status }: { status: AnalystStatus }) {
   } as const;
   const m = map[status];
   return <span className={"text-xs " + m.color}>{m.text}</span>;
+}
+
+export function RevisionBadge({ info }: { info?: RevisionInfo }) {
+  if (!info) return null;
+  if (info.mode === "revising") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-800">
+        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+        修订中
+      </span>
+    );
+  }
+  return (
+    <span
+      className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800"
+      title="本段已根据你的新偏好重跑"
+    >
+      ✨ 已修订 v{info.version}
+    </span>
+  );
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Activity,
   BarChart3,
   Bot,
   Briefcase,
@@ -17,6 +18,7 @@ import {
   Mountain,
   PanelLeft,
   Settings2,
+  UserCircle,
   UsersRound,
 } from "lucide-react";
 import { listDiagnosisTasks } from "@/lib/diagnosis-api";
@@ -25,9 +27,11 @@ import { buildRecentStocks, type RecentStock } from "@/lib/recent-stocks";
 const NAV_ITEMS = [
   { label: "首页", icon: BarChart3, href: "/" },
   { label: "论股 Agent", icon: Bot, href: "/debate/single" },
+  { label: "短线分析", icon: Activity, href: "/short-term" },
   { label: "持仓诊断", icon: Briefcase, href: "/debate/portfolio" },
   { label: "批量分析", icon: Layers3, href: "/debate/batch" },
   { label: "分析任务", icon: ListChecks, href: "/tasks" },
+  { label: "我的画像", icon: UserCircle, href: "/settings/agent" },
   { label: "大师百科", icon: UsersRound, href: "/masters" },
   { label: "模型配置", icon: SlidersHorizontal, href: "/settings/llm" },
   { label: "数据源", icon: DatabaseZap, href: "/settings/datasource" },
@@ -75,7 +79,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   return (
-    <div className={`min-h-screen bg-[#f6f3ee] text-ink-900 transition-[padding] duration-200 ${collapsed ? "lg:pl-[88px]" : "lg:pl-[282px]"}`}>
+    <div
+      className={`min-h-screen bg-[#f6f3ee] text-ink-900 transition-[padding] duration-200 ${collapsed ? "lg:pl-[88px]" : "lg:pl-[282px]"}`}
+      style={{ paddingRight: "var(--hs-revise-offset, 0px)" }}
+    >
       <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r border-ink-200/80 bg-[#fbfaf7] transition-[width] duration-200 lg:flex lg:flex-col ${collapsed ? "w-[88px]" : "w-[282px]"}`}>
         <Link
           href="/"

@@ -36,6 +36,7 @@ from app.schemas.diagnosis import (
     ShareReportResponse,
 )
 from app.services.orchestrator import run_diagnosis_w5a
+from app.api.profile import get_diagnosis_preview as _get_personalization_preview
 
 logger = logging.getLogger(__name__)
 
@@ -157,12 +158,15 @@ async def _run_and_persist(diagnosis_id: str, pending: dict) -> None:
             start_id=start_id,
         )
 
+        anon_id_str = pending.get("anon_id")
+        anon_id_uuid = uuid.UUID(anon_id_str) if anon_id_str else None
         report = await run_diagnosis_w5a(
             queue=queue,
             holdings=pending["holdings"],
             masters=pending["masters"],
             llm_config=pending["llm"],
             mode=pending.get("mode", "portfolio"),
+            anon_id=anon_id_uuid,
         )
 
         async with SessionLocal() as db:
@@ -172,6 +176,23 @@ async def _run_and_persist(diagnosis_id: str, pending: dict) -> None:
                 diag2.report_json = report
                 diag2.finished_at = datetime.now(timezone.utc)
                 await db.commit()
+                # Phase 6: 生成 L1 诊股卡片(失败不阻塞)
+                try:
+                    from app.services.memory.card_builder import build_and_save_card
+                    await build_and_save_card(db, diag2)
+                except Exception:
+                    logger.exception("build_and_save_card failed; not critical")
+                # 记录 diagnosis_completed 信号
+                try:
+                    from app.services.memory.signals import record_signal
+                    if diag2.anon_id:
+                        await record_signal(
+                            db, diag2.anon_id, "diagnosis_completed",
+                            payload={"status": diag2.status, "mode": diag2.mode},
+                            diagnosis_id=diag2.id,
+                        )
+                except Exception:
+                    logger.exception("record_signal diagnosis_completed failed")
     except Exception as e:
         logger.exception("diagnosis producer failed")
         try:
@@ -239,12 +260,21 @@ async def start(
         "masters": req.masters,
         "llm": req.llm.model_dump(),
         "mode": mode,
+        "anon_id": str(anon.id),
     }
     _RUNNING[diagnosis_id] = asyncio.create_task(_run_and_persist(diagnosis_id, pending))
+
+    # Phase 8:启动接口附带 personalization 预告(失败不阻塞)
+    personalization = None
+    try:
+        personalization = await _get_personalization_preview(db=db, anon=anon)
+    except Exception:
+        logger.exception("personalization preview failed; omit from start response")
 
     return DiagnosisStartResponse(
         diagnosis_id=diagnosis_id,
         stream_url=f"/api/diagnosis/{diagnosis_id}/stream",
+        personalization=personalization,
     )
 
 

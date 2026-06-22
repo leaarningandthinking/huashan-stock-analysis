@@ -8,10 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 
 from app.core.sse import EventQueue
+from app.db import SessionLocal
 from app.llm.base import LLMClient, Message
 from app.prompts.risk import RISK_LABELS, RISK_PROMPTS
+from app.services.memory.profile_injector import (
+    inject_memory_into_prompt,
+    mark_preferences_applied,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,16 +65,32 @@ async def run_risk_review(
     llm: LLMClient,
     model: str,
     mode: str = "portfolio",
+    anon_id: uuid.UUID | None = None,
 ) -> dict:
     user_input = _build_user_input(report_card, transcript, research_manager, mode=mode)
 
     async def safe_run(school: str) -> dict:
         label = RISK_LABELS[school]
         await queue.emit("risk.start", school=school, label=label)
+
+        # 注入 L3 偏好 + L4 画像(每个 school 独立 session,避免并发冲突)
+        system_prompt = RISK_PROMPTS[school]
+        applied_pref_ids: list[uuid.UUID] = []
+        if anon_id is not None:
+            try:
+                async with SessionLocal() as db:
+                    system_prompt, applied_pref_ids = await inject_memory_into_prompt(
+                        db, anon_id, f"risk:{school}", RISK_PROMPTS[school]
+                    )
+            except Exception:
+                logger.exception("risk %s inject memory failed; fall back", school)
+                system_prompt = RISK_PROMPTS[school]
+                applied_pref_ids = []
+
         chunks: list[str] = []
         try:
             messages = [
-                Message(role="system", content=RISK_PROMPTS[school]),
+                Message(role="system", content=system_prompt),
                 Message(role="user", content=user_input),
             ]
             async for delta in llm.stream(
@@ -84,6 +106,14 @@ async def run_risk_review(
             await queue.emit("risk.done", school=school, label=label, failed=True)
             return {"school": school, "label": label, "text": "".join(chunks),
                     "failed": True}
+
+        # LLM 成功才回写偏好使用统计
+        if applied_pref_ids:
+            try:
+                async with SessionLocal() as db:
+                    await mark_preferences_applied(db, applied_pref_ids)
+            except Exception:
+                logger.exception("risk %s mark_preferences_applied failed", school)
 
         full = "".join(chunks).strip()
         await queue.emit("risk.done", school=school, label=label,

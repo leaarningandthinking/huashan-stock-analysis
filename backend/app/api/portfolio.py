@@ -83,7 +83,7 @@ async def parse_portfolio(
         if req.manual:
             result = await parse_manual(req.manual)
         elif req.text:
-            result = await parse_text(req.text)
+            result = await parse_text(req.text, source=req.source)
         else:
             raise HTTPException(400, "portfolio 模式必须提供 manual 或 text")
     else:

@@ -13,7 +13,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from app.data.symbols import detect_exchange, fetch_all_codes, normalize_symbol, validate_code
+from app.data.symbols import (
+    POPULAR_HK_US,
+    detect_exchange,
+    fetch_all_codes,
+    fetch_all_hk_codes,
+    normalize_symbol,
+    validate_code,
+)
 from app.schemas.portfolio import (
     HoldingInput,
     HoldingItem,
@@ -35,6 +42,66 @@ class ParseResult:
 TEXT_LINE_RE = re.compile(r"[,\s\t]+")
 CODE_IN_TEXT_RE = re.compile(r"\b(\d{6}|\d{1,5}\.HK|[A-Z]{3,6})\b")
 NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+# 行内"裸"6 位代码（用于同花顺"名称换行代码"合并）
+BARE_CODE_RE = re.compile(r"(?<!\d)(\d{6})(?!\d)")
+HAS_CJK_RE = re.compile(r"[一-鿿]")
+
+# 同花顺持仓页固定字段词（用于自动判别截图来源）。
+THS_KEYWORDS = (
+    "持仓盈亏", "浮动盈亏", "当日盈亏", "参考市值", "成本价", "市值",
+    "现价", "持仓", "可用", "冻结", "盈亏", "摊薄", "同花顺",
+)
+# 纯表头 / 汇总噪声行（不含个股，归一化后整行就是这些词时丢弃）。
+THS_NOISE_TOKENS = (
+    "持仓盈亏", "浮动盈亏", "当日盈亏", "参考市值", "总资产", "总市值",
+    "可用", "可取", "冻结", "成本价", "现价", "市值", "盈亏", "数量",
+    "持仓", "名称", "代码", "摊薄成本", "持仓占比", "仓位",
+)
+
+
+def _looks_like_ths(text: str) -> bool:
+    """关键词指纹：命中 >=2 个同花顺持仓页字段词即判定为同花顺截图。"""
+    hits = sum(1 for kw in THS_KEYWORDS if kw in text)
+    return hits >= 2
+
+
+def _is_ths_noise_line(line: str) -> bool:
+    """整行只由表头/汇总词构成（无 6 位代码、无中文股名残留）→ 噪声，丢弃。"""
+    if BARE_CODE_RE.search(line):
+        return False
+    stripped = re.sub(r"[\s,，.。:：%+\-/|()（）0-9]", "", line)
+    if not stripped:
+        return True  # 纯数字/符号行（如单独一列盈亏%），交给合并逻辑前先不丢
+    # 去掉所有噪声词后还剩中文 → 可能是股名，保留
+    leftover = stripped
+    for tok in THS_NOISE_TOKENS:
+        leftover = leftover.replace(tok, "")
+    return leftover == ""
+
+
+def _normalize_ths_text(text: str) -> str:
+    """同花顺截图文本归一化：
+    1) 丢弃纯表头/汇总噪声行；
+    2) "股票名称" 单独成行、6 位代码在下一行时，合并成一行（同花顺常见排版）。
+    """
+    raw_lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    kept = [ln for ln in raw_lines if not _is_ths_noise_line(ln)]
+
+    merged: list[str] = []
+    i = 0
+    while i < len(kept):
+        cur = kept[i]
+        nxt = kept[i + 1] if i + 1 < len(kept) else ""
+        cur_has_code = bool(BARE_CODE_RE.search(cur))
+        cur_has_cjk = bool(HAS_CJK_RE.search(cur))
+        # 当前行是"纯中文名（无代码）"，下一行带 6 位代码 → 合并
+        if cur_has_cjk and not cur_has_code and BARE_CODE_RE.search(nxt):
+            merged.append(f"{cur} {nxt}")
+            i += 2
+            continue
+        merged.append(cur)
+        i += 1
+    return "\n".join(merged)
 
 
 async def parse_codes_only(codes: list[str]) -> ParseResult:
@@ -91,6 +158,42 @@ async def parse_manual(rows: list[HoldingInput]) -> ParseResult:
     return ParseResult(holdings=holdings, warnings=warnings)
 
 
+CJK_ONLY_RE = re.compile(r"[一-鿿]+")
+
+
+def _cjk_only(s: str) -> str:
+    return "".join(CJK_ONLY_RE.findall(s))
+
+
+def _fuzzy_find_name(line_cjk: str, sorted_names: list[str]) -> str | None:
+    """OCR 名字容错匹配：字序颠倒（长江电力↔长电力江）、个别字认错（制药↔制约）也能命中。
+
+    仅对 >=3 字的股名启用：3 字名要求全字命中（只容颠倒），4 字及以上容 1 字错，
+    避免 2 字名误匹配。返回命中的标准股名或 None。
+    """
+    if len(line_cjk) < 3:
+        return None
+    best: tuple[int, int, str] | None = None  # (重合字数, 名字长度, 名字)
+    for nm in sorted_names:
+        L = len(nm)
+        if L < 3 or L > len(line_cjk):
+            continue
+        need = L if L == 3 else L - 1
+        local = 0
+        for i in range(0, len(line_cjk) - L + 1):
+            window = line_cjk[i : i + L]
+            common = sum(1 for c in nm if c in window)
+            if common > local:
+                local = common
+            if local == L:
+                break
+        if local >= need:
+            cand = (local, L, nm)
+            if best is None or (cand[0], cand[1]) > (best[0], best[1]):
+                best = cand
+    return best[2] if best else None
+
+
 def _normalize_for_match(s: str) -> str:
     """归一化：去所有空白、全角转半角、去掉 OCR 常见的杂字符。
     用于"贵 州 茅 台" / "贵州茅台Ａ" 这种情况下还能匹配。
@@ -103,8 +206,26 @@ def _normalize_for_match(s: str) -> str:
     ))
 
 
-async def parse_text(text: str) -> ParseResult:
+async def parse_text(text: str, source: str | None = None) -> ParseResult:
     """文本粘贴 / OCR 输出路径。
+
+    - source="ths"：强制走同花顺归一化；"generic"：强制通用；None/"auto"：关键词指纹自动判别。
+    - 同花顺路径会先做文本归一化，再与通用解析结果比对，谁识别出的有效持仓多就用谁
+      （自动回退，避免归一化把版面规则套坏后比通用还差）。
+    """
+    is_ths = source == "ths" or (source in (None, "auto") and _looks_like_ths(text))
+    if not is_ths:
+        return await _parse_holding_lines(text)
+
+    ths_result = await _parse_holding_lines(_normalize_ths_text(text))
+    plain_result = await _parse_holding_lines(text)
+    ths_valid = sum(1 for h in ths_result.holdings if h.valid)
+    plain_valid = sum(1 for h in plain_result.holdings if h.valid)
+    return ths_result if ths_valid >= plain_valid else plain_result
+
+
+async def _parse_holding_lines(text: str) -> ParseResult:
+    """逐行解析（通用核心）：
 
     多 stage 兜底：
       1) 行内含 6 位代码 → 用代码（最准）
@@ -114,17 +235,34 @@ async def parse_text(text: str) -> ParseResult:
     holdings: list[HoldingItem] = []
     warnings: list[str] = []
 
-    # 拉全量股票名 → 代码 索引（缓存里有，毫秒级）
+    # 拉全量股票名 → 代码 索引（缓存里有，毫秒级）。A 股 + 港股 + 常用美股，
+    # 因为同花顺持仓页只显示名字不显示代码，必须靠名字反查（港股名录也要在内）。
     try:
         all_codes = await fetch_all_codes()
     except Exception:
         all_codes = []
+    try:
+        hk_codes = await fetch_all_hk_codes()
+    except Exception:
+        hk_codes = []
 
     name_to_info: dict[str, dict] = {}
-    for it in all_codes:
-        nm = _normalize_for_match(it["name"])
+
+    def _add(code: str, name: str, exchange: str) -> None:
+        nm = _normalize_for_match(name)
         if nm and nm not in name_to_info:
-            name_to_info[nm] = it
+            name_to_info[nm] = {"code": code, "name": name, "exchange": exchange}
+
+    for it in all_codes:
+        try:
+            _add(it["code"], it["name"], detect_exchange(it["code"]))
+        except ValueError:
+            continue
+    for it in hk_codes:
+        _add(it["code"], it["name"], it.get("exchange", "hk"))
+    for it in POPULAR_HK_US:
+        _add(it["code"], it["name"], it["exchange"])
+
     # 长名字优先匹配，避免 "万科" 误中 "万科Ａ"（实际是反过来：先匹配 "万科Ａ"）
     sorted_names = sorted(name_to_info.keys(), key=len, reverse=True)
 
@@ -144,18 +282,17 @@ async def parse_text(text: str) -> ParseResult:
                 info = v
                 matched_code_str = code
 
-        # Stage 2: 名字兜底
+        # Stage 2: 名字兜底（先精确子串，再 OCR 容错模糊匹配）
         if info is None:
             line_norm = _normalize_for_match(line)
             for nm in sorted_names:
                 if len(nm) >= 2 and nm in line_norm:
-                    it = name_to_info[nm]
-                    info = {
-                        "code": it["code"],
-                        "name": it["name"],
-                        "exchange": detect_exchange(it["code"]),
-                    }
+                    info = dict(name_to_info[nm])  # 已含 code / name / exchange
                     break
+            if info is None:
+                fuzzy = _fuzzy_find_name(_cjk_only(line_norm), sorted_names)
+                if fuzzy:
+                    info = dict(name_to_info[fuzzy])
 
         if info is None:
             warnings.append(f"第 {idx} 行未识别股票：{line[:40]}")

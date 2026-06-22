@@ -3,21 +3,28 @@
 import { useEffect, useState } from "react";
 import { Upload, Image as ImageIcon, X, Loader2, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { recognizeImage, type OcrProgress } from "@/lib/tesseract";
+import { recognizeImage, type OcrProgress, type OcrSource } from "@/lib/tesseract";
 
 interface UploadedImage {
   id: string;
   file: File;
   dataUrl: string;
   ocrText: string | null;
+  detectedSource: "ths" | "generic" | null;
   status: "pending" | "ocr" | "done" | "fail";
   error?: string;
 }
 
 interface Props {
-  /** OCR 完成后回调，把拼接的文本传出去 */
-  onTextExtracted: (text: string) => void;
+  /** OCR 完成后回调，把拼接的文本 + 截图来源传出去 */
+  onTextExtracted: (text: string, source: "ths" | "generic") => void;
 }
+
+const SOURCE_OPTIONS: { value: OcrSource; label: string }[] = [
+  { value: "auto", label: "自动识别" },
+  { value: "ths", label: "同花顺" },
+  { value: "generic", label: "通用" },
+];
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -30,6 +37,7 @@ function fileToDataUrl(file: File): Promise<string> {
 
 export function ImageOcrTab({ onTextExtracted }: Props) {
   const [images, setImages] = useState<UploadedImage[]>([]);
+  const [source, setSource] = useState<OcrSource>("auto");
   const [running, setRunning] = useState(false);
   const [globalProgress, setGlobalProgress] = useState<OcrProgress | null>(null);
   const [combinedText, setCombinedText] = useState("");
@@ -41,7 +49,11 @@ export function ImageOcrTab({ onTextExtracted }: Props) {
       .map((i, idx) => `=== 截图 ${idx + 1} ===\n${i.ocrText}`)
       .join("\n\n");
     setCombinedText(text);
-    if (text) onTextExtracted(text);
+    // 任一张被判定为同花顺，则整批按同花顺解析。
+    const batchSource: "ths" | "generic" = images.some((i) => i.detectedSource === "ths")
+      ? "ths"
+      : "generic";
+    if (text) onTextExtracted(text, batchSource);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [images]);
 
@@ -59,6 +71,7 @@ export function ImageOcrTab({ onTextExtracted }: Props) {
         file: f,
         dataUrl,
         ocrText: null,
+        detectedSource: null,
         status: "pending",
       });
     }
@@ -80,13 +93,15 @@ export function ImageOcrTab({ onTextExtracted }: Props) {
           prev.map((x) => (x.id === img.id ? { ...x, status: "ocr" } : x)),
         );
         try {
-          const text = await recognizeImage(img.dataUrl, (p) =>
-            setGlobalProgress(p),
+          const result = await recognizeImage(
+            img.dataUrl,
+            (p) => setGlobalProgress(p),
+            source,
           );
           setImages((prev) =>
             prev.map((x) =>
               x.id === img.id
-                ? { ...x, ocrText: text, status: "done" }
+                ? { ...x, ocrText: result.text, detectedSource: result.source, status: "done" }
                 : x,
             ),
           );
@@ -145,6 +160,31 @@ export function ImageOcrTab({ onTextExtracted }: Props) {
         />
       </label>
 
+      {/* 截图来源（影响识别策略） */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-ink-500">截图来源</span>
+        <div className="inline-flex overflow-hidden rounded-md border border-ink-200">
+          {SOURCE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setSource(opt.value)}
+              className={
+                "px-3 py-1.5 text-xs transition " +
+                (source === opt.value
+                  ? "bg-scarlet-600 text-white"
+                  : "bg-white text-ink-600 hover:bg-ink-50")
+              }
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-ink-400">
+          同花顺用户选「同花顺」可按持仓页固定版面分列识别，更准
+        </span>
+      </div>
+
       {/* 缩略图列表 */}
       {images.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2">
@@ -164,6 +204,11 @@ export function ImageOcrTab({ onTextExtracted }: Props) {
                   截图 {idx + 1} · {(img.file.size / 1024).toFixed(0)} KB
                 </p>
                 <StatusBadge status={img.status} error={img.error} />
+                {img.detectedSource === "ths" && (
+                  <span className="ml-1 inline-block rounded bg-scarlet-50 px-1.5 py-0.5 text-[10px] font-medium text-scarlet-600">
+                    同花顺版面
+                  </span>
+                )}
                 {img.ocrText && (
                   <details className="mt-1">
                     <summary className="cursor-pointer text-ink-500 hover:text-scarlet-600">
@@ -231,7 +276,10 @@ export function ImageOcrTab({ onTextExtracted }: Props) {
             value={combinedText}
             onChange={(e) => {
               setCombinedText(e.target.value);
-              onTextExtracted(e.target.value);
+              const batchSource: "ths" | "generic" = images.some((i) => i.detectedSource === "ths")
+                ? "ths"
+                : "generic";
+              onTextExtracted(e.target.value, batchSource);
             }}
             spellCheck={false}
           />

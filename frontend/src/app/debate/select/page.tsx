@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, ArrowRight, AlertCircle } from "lucide-react";
+import { Loader2, ArrowRight, AlertCircle, CheckCircle2, ChevronDown, MousePointerClick } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { MasterSummary } from "@/lib/api";
 import { startDiagnosis } from "@/lib/diagnosis-api";
@@ -24,6 +24,7 @@ function SelectInner() {
 
   const [masters, setMasters] = useState<MasterSummary[] | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,7 +99,7 @@ function SelectInner() {
   })();
 
   return (
-    <main className="container mx-auto max-w-4xl py-10">
+    <main className="container mx-auto max-w-5xl py-10">
       <h1 className="mb-2 text-3xl font-bold text-ink-800">选大师</h1>
       <p className="mb-2 text-sm text-ink-500">
         勾选 2-3 位大师组队，进入群雄论股流程。
@@ -109,6 +110,16 @@ function SelectInner() {
           持仓 ID：<span className="font-mono">{pid}</span>
         </p>
       )}
+
+      <div className="mb-5 flex items-start gap-3 rounded-md border border-scarlet-200 bg-scarlet-50/70 p-3 text-sm text-scarlet-800">
+        <MousePointerClick className="mt-0.5 h-4 w-4 flex-none" />
+        <div>
+          <p className="font-semibold">请先选中下方大师卡片</p>
+          <p className="text-xs leading-5 text-scarlet-700">
+            选择 2-3 位后，底部“开始论股”按钮会变为可用；不确定选谁时，可展开“标签介绍”查看擅长行业和判断风格。
+          </p>
+        </div>
+      </div>
 
       {!enabledProvider && llmStore.hydrated && (
         <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-800">
@@ -140,38 +151,75 @@ function SelectInner() {
           <h2 className="mb-3 border-l-4 border-scarlet-600 pl-3 text-base font-semibold text-ink-700">
             {SCHOOL_LABEL[school] ?? school}
           </h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {list.map((m) => {
               const checked = selected.includes(m.slug);
               const disabled = !checked && selected.length >= 3;
+              const opened = expanded === m.slug;
               return (
-                <button
+                <div
                   key={m.slug}
-                  onClick={() => toggle(m.slug)}
-                  disabled={disabled}
                   className={cn(
-                    "flex items-center gap-3 rounded-md border bg-white/70 p-3 text-left transition",
+                    "rounded-md border bg-white/80 p-3 text-left transition",
                     checked
                       ? "border-scarlet-500 ring-2 ring-scarlet-200"
                       : "border-ink-200 hover:border-scarlet-300",
                     disabled && "opacity-40",
                   )}
                 >
-                  {m.avatar_url && (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      src={m.avatar_url}
-                      alt={m.name}
-                      className="h-12 w-12 flex-none rounded-full object-cover"
-                    />
-                  )}
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-ink-800">
-                      {m.name}
-                    </p>
-                    <p className="truncate text-xs text-ink-500">{m.tagline}</p>
+                  <button
+                    type="button"
+                    onClick={() => toggle(m.slug)}
+                    disabled={disabled}
+                    className="flex w-full items-center gap-3 text-left disabled:cursor-not-allowed"
+                    aria-pressed={checked}
+                  >
+                    {m.avatar_url && (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={m.avatar_url}
+                        alt={m.name}
+                        className="h-12 w-12 flex-none rounded-full object-cover"
+                      />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-ink-800">
+                        {m.name}
+                      </p>
+                      <p className="mt-0.5 text-xs leading-5 text-ink-500">{m.tagline}</p>
+                    </div>
+                    {checked && <CheckCircle2 className="h-5 w-5 flex-none text-scarlet-600" />}
+                  </button>
+
+                  <div className="mt-3 border-t border-ink-100 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setExpanded(opened ? null : m.slug)}
+                      className="flex w-full items-center justify-between text-xs font-medium text-ink-500 hover:text-scarlet-700"
+                      aria-expanded={opened}
+                    >
+                      标签介绍
+                      <ChevronDown
+                        className={cn("h-4 w-4 transition", opened && "rotate-180")}
+                      />
+                    </button>
+                    {opened && (
+                      <div className="mt-2 space-y-2">
+                        <div className="flex flex-wrap gap-1.5">
+                          {(m.tags ?? []).map((tag) => (
+                            <span
+                              key={tag}
+                              className="rounded bg-ink-100 px-1.5 py-0.5 text-[11px] font-medium text-ink-600"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                        <p className="text-xs leading-5 text-ink-500">{m.bio}</p>
+                      </div>
+                    )}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
