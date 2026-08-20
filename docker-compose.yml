@@ -1,80 +1,92 @@
+name: huashan-lungu
+
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: huashan-postgres
     environment:
       POSTGRES_DB: ${DB_NAME:-huashan}
       POSTGRES_USER: ${DB_USER:-huashan}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-huashan_dev}
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./docker/postgres:/docker-entrypoint-initdb.d:ro
-    ports:
-      # 避免和 QuantDinger 的 5432 冲突，host 侧用 55432
-      - "127.0.0.1:55432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-huashan} -d ${DB_NAME:-huashan}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    container_name: huashan-redis
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
-    ports:
-      # 避免和 QuantDinger 的 6379 冲突
-      - "127.0.0.1:56379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
+    restart: unless-stopped
 
   backend:
-    build: ./backend
-    container_name: huashan-backend
-    env_file: .env
+    image: ${BACKEND_IMAGE:-ghcr.io/leaarningandthinking/huashan-stock-analysis/backend}:${APP_VERSION:-v0.1.0}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: .env
+        required: false
     environment:
+      APP_ENV: production
+      AUTO_CREATE_TABLES: "false"
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-huashan}:${DB_PASSWORD:-huashan_dev}@postgres:5432/${DB_NAME:-huashan}
       REDIS_URL: redis://redis:6379/0
       SKILL_DIR: /app/skills/huashan-lungu-v2
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      SESSION_SECRET: ${SESSION_SECRET:-local-session-secret-change-me}
+      AUTH_SECRET: ${AUTH_SECRET:-local-auth-secret-change-me}
+      PASSWORD_HASH_PEPPER: ${PASSWORD_HASH_PEPPER:-local-password-pepper-change-me}
+      RATE_LIMIT_PER_DAY: ${RATE_LIMIT_PER_DAY:-20}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      # Skill 随仓库发布，容器内只读挂载。
-      - ./skills/huashan-lungu-v2:/app/skills/huashan-lungu-v2:ro
-      - ./backend/app:/app/app  # 开发期热重载
-    ports:
-      - "8000:8000"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    expose:
+      - "8000"
+    restart: unless-stopped
 
   frontend:
-    build: ./frontend
-    container_name: huashan-frontend
-    depends_on:
-      - backend
+    image: ${FRONTEND_IMAGE:-ghcr.io/leaarningandthinking/huashan-stock-analysis/frontend}:${APP_VERSION:-v0.1.0}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     environment:
-      # 浏览器侧用相对路径走 Next rewrite，这个 var 留作 SSE 等绝对 URL 备用
-      NEXT_PUBLIC_API_BASE: http://localhost:8000
-      # Server Component / Next 服务侧 fetch 走 docker 内网
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      NEXT_DIST_DIR: .next-build
+      NEXT_PUBLIC_API_BASE: http://localhost:3000
       API_BASE_INTERNAL: http://backend:8000
-      # 开发服务和生产 build 使用不同输出目录，避免 .next 被并发覆盖后静态资源 500
-      NEXT_DIST_DIR: .next-dev
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
     ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
-      # 配置文件改了不用 rebuild
-      - ./frontend/next.config.mjs:/app/next.config.mjs:ro
-      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts:ro
-      - ./frontend/postcss.config.mjs:/app/postcss.config.mjs:ro
-      - ./frontend/tsconfig.json:/app/tsconfig.json:ro
+      - "${FRONTEND_PORT:-3000}:3000"
+    restart: unless-stopped
 
 volumes:
   pg_data:

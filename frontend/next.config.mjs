@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  output: "standalone",
   // 关掉 StrictMode：它在 dev 模式下故意让 useEffect 跑两次，
   // 这会让 SSE 连接被关掉重连，导致后端 _PENDING 被消费一次后第二次连接 404
   reactStrictMode: false,

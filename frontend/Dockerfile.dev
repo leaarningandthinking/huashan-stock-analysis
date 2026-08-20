@@ -1,0 +1,20 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+RUN npm config set registry "${NPM_REGISTRY}"
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+
+ENV NODE_ENV=development \
+    NEXT_DIST_DIR=.next-dev \
+    HOSTNAME=0.0.0.0 \
+    PORT=3000
+
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,8 +26,9 @@ async def health(
         redis_ok = bool(pong)
     except Exception:
         pass
-    return {
+    payload = {
         "status": "ok" if (db_ok and redis_ok) else "degraded",
         "db": db_ok,
         "redis": redis_ok,
     }
+    return JSONResponse(status_code=200 if db_ok and redis_ok else 503, content=payload)

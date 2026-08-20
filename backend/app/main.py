@@ -29,9 +29,12 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动：建表 + 预热 Redis
+    # 开发环境兼容自动建表；生产环境由容器入口先执行 Alembic。
+    if settings.auto_create_tables:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
         await conn.execute(
             update(Diagnosis)
             .where(Diagnosis.status.in_(["pending", "running"]))

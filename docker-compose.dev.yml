@@ -1,0 +1,51 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: huashan-lungu-backend:dev
+    entrypoint: []
+    environment:
+      APP_ENV: development
+      AUTO_CREATE_TABLES: "true"
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-huashan}:${DB_PASSWORD:-huashan_dev}@postgres:5432/${DB_NAME:-huashan}
+      REDIS_URL: redis://redis:6379/0
+      SKILL_DIR: /app/skills/huashan-lungu-v2
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001}
+    volumes:
+      - ./backend/app:/app/app
+      - ./skills/huashan-lungu-v2:/app/skills/huashan-lungu-v2:ro
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    image: huashan-lungu-frontend:dev
+    entrypoint: []
+    environment:
+      NODE_ENV: development
+      NEXT_DIST_DIR: .next-dev
+      NEXT_PUBLIC_API_BASE: http://localhost:8000
+      API_BASE_INTERNAL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/next.config.mjs:/app/next.config.mjs:ro
+      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts:ro
+      - ./frontend/postcss.config.mjs:/app/postcss.config.mjs:ro
+      - ./frontend/tsconfig.json:/app/tsconfig.json:ro
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    command: ["npm", "run", "dev"]

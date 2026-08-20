@@ -27,37 +27,66 @@
 
 ### 1. 准备环境
 
-需要安装：
+普通用户只需要安装：
 
 - Docker Desktop
-- Node.js 20+
-- Python 3.11+
 
 ### 2. 配置环境变量
 
 ```bash
-cp .env.example .env
+bash scripts/install.sh
 ```
+
+安装脚本会自动创建 `.env`、生成本地安全密钥、拉取已发布镜像、启动 PostgreSQL/Redis/前后端，并检查后端和联网数据源状态。
 
 本地开发默认端口：
 
 - Frontend：http://localhost:3000
-- Backend：http://localhost:8000
-- API Docs：http://localhost:8000/docs
+- Backend 仅在 Docker 内网提供服务
 
-如果 3000 被占用，Next.js 会自动切到 3001。`.env.example` 已默认允许 3000 和 3001。
-
-### 3. Docker 启动
+如果使用 Windows PowerShell：
 
 ```bash
-docker compose up --build
+.\scripts\install.ps1
 ```
 
-### 4. 前端本地开发
+安装完成后打开 http://localhost:3000，在设置页配置自己的 LLM Provider、API Key 和模型。A 股、港股、美股数据会在运行时通过互联网获取。
+
+### 3. 源码开发
+
+开发者可以使用源码构建和热重载：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+源码开发需要 Node.js 20+ 和 Python 3.11+。生产镜像已经预构建，普通用户不需要这些运行时。
+
+### 4. 停止和查看日志
+
+```bash
+docker compose ps
+docker compose logs -f backend
+docker compose down
+```
+
+PostgreSQL 数据保存在 Docker volume 中，执行 `docker compose down` 不会删除历史报告。
+
+### 5. 数据源检查
+
+后端启动后可以访问：
+
+```text
+/api/datasource/health
+```
+
+该接口会检查 akshare 和 yfinance。第三方免费数据源可能受到限流、地区网络和服务波动影响；部署成功不代表第三方接口永久可用。
+
+### 6. 前端本地开发
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -68,7 +97,7 @@ npm run dev
 
 这样可以避免 dev server 和 build 同时写 `.next` 导致 CSS/JS 静态资源 500。
 
-### 5. 后端本地开发
+### 7. 后端本地开发
 
 ```bash
 cd backend
@@ -99,11 +128,14 @@ cd backend && pytest
 ```text
 backend/             FastAPI 后端、数据源、诊断编排、SSE
 frontend/            Next.js 前端
-docker/              Postgres 初始化脚本
+docker-compose.yml   普通用户使用的预构建镜像部署
+docker-compose.dev.yml  源码开发覆盖配置
+scripts/             安装和启动检查脚本
+backend/alembic/     数据库迁移
+.github/workflows/   多架构镜像发布流水线
 docs/                维护说明和发布检查清单
 skills/              内置 huashan-lungu-v2 大师方法论与工作流
 ARCHITECTURE.md      架构说明
-docker-compose.yml   本地一键启动
 ```
 
 短线分析模块的维护说明见 [docs/SHORT_TERM_ANALYSIS.md](./docs/SHORT_TERM_ANALYSIS.md)。

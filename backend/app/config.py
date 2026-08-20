@@ -1,11 +1,16 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    app_env: Literal["development", "production"] = "development"
+    auto_create_tables: bool = True
 
     # DB / Redis
     database_url: str = "postgresql+asyncpg://huashan:huashan_dev@localhost:5432/huashan"
@@ -33,6 +38,27 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        if self.app_env == "production":
+            secrets_to_check = {
+                "SESSION_SECRET": self.session_secret,
+                "AUTH_SECRET": self.auth_secret,
+                "PASSWORD_HASH_PEPPER": self.password_hash_pepper,
+            }
+            invalid = [
+                name
+                for name, value in secrets_to_check.items()
+                if len(value) < 32 or value.startswith(("dev-", "local-", "change-me"))
+            ]
+            if invalid:
+                names = ", ".join(invalid)
+                raise ValueError(
+                    f"Production secrets are missing or too weak: {names}. "
+                    "Run scripts/install.sh or set them in .env."
+                )
+        return self
 
 
 @lru_cache
