@@ -159,4 +159,4 @@ cd ../backend && python3 -m compileall app
 
 ## License
 
-GPL-3.0-only. See [LICENSE](./LICENSE).
+MIT License. See [LICENSE](./LICENSE).

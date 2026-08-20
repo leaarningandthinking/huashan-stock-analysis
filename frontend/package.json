@@ -2,7 +2,7 @@
   "name": "huashan-lungu-frontend",
   "version": "0.1.0",
   "private": true,
-  "license": "GPL-3.0-only",
+  "license": "MIT",
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
     "build": "NEXT_DIST_DIR=.next-build next build",
